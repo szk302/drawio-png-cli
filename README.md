@@ -1,1 +1,131 @@
 # drawio-png-cli
+
+`dip` は `.drawio.png` に埋め込まれた draw.io の XML を抽出・検証・更新する Rust 製 CLI です。圧縮ページを展開して AI で編集し、draw.io Desktop で PNG を再描画できます。
+
+## インストール
+
+開発環境の Rust は `mise.toml` で固定しています。
+
+```sh
+mise install
+mise exec -- cargo install --path . --locked
+```
+
+Rust を直接管理している場合は `cargo install --path . --locked` でもインストールできます。実行ファイル名は `dip` です。抽出・検証・メタデータ更新には Node.js や Python は不要です。画像の再描画には別途 draw.io Desktop 27.0.2 以降が必要です。
+
+## 使い方
+
+```sh
+# 圧縮ページを展開して、全ページの編集可能な XML を取得
+dip extract diagram.drawio.png -o diagram.xml
+
+# XML または PNG 内の図面を検証
+dip validate diagram.xml
+dip validate diagram.drawio.png
+
+# XML から先頭ページを描画し、全ページの XML を PNG に保存
+dip embed -i diagram.xml -o diagram.drawio.png
+
+# XML は stdin でも指定可能
+cat diagram.xml | dip embed -o diagram.drawio.png
+
+# ベース画像の見た目を維持し、XML だけを更新（同じパスでも可）
+dip embed -i diagram.xml --no-render -b diagram.drawio.png -o diagram.drawio.png
+
+# ベース画像なしなら、透明な 1×1 PNG に XML を保存
+dip embed -i diagram.xml --no-render -o new.drawio.png
+```
+
+`extract` の `-o` を省略すると XML を stdout に出力します。診断・警告は stderr に出力します。正常終了は `0`、処理・検証エラーは `1`、引数エラーは `2` です。
+
+`--base-image` は `--no-render` と組み合わせます。`--no-render` は画像と XML の見た目が同期されない旨を警告します。ベース画像を指定しない場合、既存の出力 PNG の画像は再利用しません。
+
+## Desktop の準備
+
+draw.io Desktop の検索順は次のとおりです。
+
+1. `DIP_DRAWIO_PATH` に指定された実行ファイル
+2. PATH 内の `drawio`／`draw.io`（Windows では `.exe`）
+3. OS の標準インストール先（macOS の `/Applications` と `~/Applications`、Windows の `ProgramFiles`／`LOCALAPPDATA`、Linux の `/opt/drawio/drawio`）
+
+```sh
+export DIP_DRAWIO_PATH=/Applications/draw.io.app/Contents/MacOS/draw.io
+```
+
+明示指定が不正な場合、別の実行ファイルには切り替えません。描画のタイムアウトは 60 秒です。Desktop が見つからない場合や描画に失敗した場合はエラー終了し、既存出力は変更しません。Chrome フォールバックと `DIP_CHROME_PATH`／`CHROME_PATH` は初回実装の対象外です。
+
+Desktop の追加オプションは `DIP_DRAWIO_ARGS` に指定します。`DIP_DRAWIO_PATH` には実行ファイルのパスだけを指定してください。
+
+```sh
+export DIP_DRAWIO_PATH=/opt/drawio/drawio
+export DIP_DRAWIO_ARGS='--disable-gpu --disable-dev-shm-usage'
+
+# GUI のないコンテナでは、Xvfb 経由で dip を起動する
+xvfb-run -a dip embed -i diagram.xml -o diagram.drawio.png
+```
+
+Desktop のほかに `xvfb`・`xauth`、日本語を描画する場合は日本語フォントをコンテナに用意してください。`DIP_DRAWIO_ARGS` の指定だけでは仮想ディスプレイは起動しません。
+
+空白を含む値は引用符で囲みます。
+
+```sh
+export DIP_DRAWIO_ARGS='--disable-gpu --user-data-dir="/tmp/drawio profile"'
+```
+
+- 全 OS で POSIX シェル形式の引用符・バックスラッシュによる引数分割を使います。Windows のパスも引用符で囲むなど、この形式に合わせて指定してください。
+- シェルは起動せず、環境変数・`~`・ワイルドカード・コマンド置換は展開しません。必要な値は明示的に指定します。
+- 未設定・空文字・空白のみなら追加引数はありません。閉じていない引用符や Unicode として読めない値は、Desktop 起動前に終了コード `1` のエラーにします。
+- 追加引数は `dip` が生成する描画引数の前に渡します。入力ファイル、出力先、形式、ページ選択は `dip` が管理するため、これらを変更するオプションや `--` は指定しないでください。
+- `extract`・`validate`・`embed --no-render` は `DIP_DRAWIO_ARGS` を読みません。
+
+既存の Xvfb ラッパーを `DIP_DRAWIO_PATH` に指定する方法も使えます。ラッパーでは `"$@"` を転送してください。
+
+```sh
+#!/bin/sh
+exec xvfb-run -a /opt/drawio/drawio "$@"
+```
+
+`dip` は Electron の sandbox を自動で無効化しません。テスト用コンテナで sandbox を無効化する必要がある場合は、`DIP_DRAWIO_ARGS` に `--no-sandbox` を明示的に追加できます。
+
+## 検証・互換性・保存
+
+- 入力 XML は UTF-8（BOM 可）。XML 構文、`mxfile`／`mxGraphModel` ルート、各ページの `root` 直下の基盤セル `id="0"`・`id="1"` を検証します。空の図面や壊れた圧縮ページは拒否します。
+- 構造検証は、すべての描画・レイアウト不具合を防ぐ保証ではありません。
+- `tEXt`／`zTXt` の `mxfile`／`mxGraphModel` を読み取り、旧 Desktop の raw DEFLATE、URL エンコードの二重化にも対応します。競合する複数の図面メタデータは拒否します。
+- 抽出時は全ページを非圧縮 XML にします。ページ順・名前・属性・未知要素を保持しますが、元の XML 文字列との完全一致は保証しません。
+- 保存時は既存の図面メタデータを置換し、URL エンコードした XML を一つの `tEXt` チャンクへ格納します。ベース画像の画像データ・無関係なチャンクは保持します。
+- 入力、展開データ、出力 PNG、デコード後の画像バッファに 64 MiB の上限があります。DTD と外部エンティティは受け付けません。
+- 出力先と同じディレクトリの一時ファイルに保存・同期後、アトミックに置換します。既存ファイルの権限を引き継ぎ、失敗時の一時ファイルは片付けます。出力先ディレクトリは事前に作成してください。
+- `--no-validate` はデバッグ用です。XML の構造検証・正規化を省略し、不正な XML も埋め込めます。UTF-8・サイズ制限・PNG 検査・アトミック保存は維持します。
+
+## 開発とテスト
+
+```sh
+mise exec -- cargo fmt --check
+mise exec -- cargo clippy --locked --all-targets -- -D warnings
+mise exec -- cargo test --locked
+mise exec -- cargo build --release --locked
+```
+
+固定 fixture による互換テスト、CLI の往復編集、保存失敗時の保護、Unix のテスト用レンダラーによる引数・異常終了・タイムアウト検証を含みます。CI は Linux・macOS・Windows で実行します。
+
+Desktop の実機テストは通常のテストから除外しています。Desktop と描画環境を用意して明示的に実行してください。
+
+```sh
+DIP_TEST_DRAWIO_PATH=/path/to/drawio-or-wrapper \
+  mise exec -- cargo test --test desktop -- --ignored --nocapture
+```
+
+実装の参考にしたコードと fixture の説明は [tests/fixtures/README.md](tests/fixtures/README.md)、要件は [docs/prd.md](docs/prd.md) を参照してください。`.tmp` の参考リポジトリはビルドに使用しません。
+
+変更は作業ブランチで行い、Conventional Commits 形式でコミットします。
+
+## ライセンス
+
+本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。
+参考にした drawio-exporter の参照範囲・著作権表示・MIT ライセンス全文は
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) に記載しています。
+他の参照元と Cargo 依存ライブラリには、それぞれのライセンスが適用されます。
+
+ソース配布には `LICENSE` と `THIRD_PARTY_NOTICES.md` を含めます。
+バイナリアーカイブを作成する際も、この2ファイルを同梱してください。

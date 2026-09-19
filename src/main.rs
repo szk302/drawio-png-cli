@@ -1,0 +1,119 @@
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use drawio_png_cli::{document, png_data, render, storage};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
+
+#[derive(Parser)]
+#[command(
+    name = "dip",
+    version,
+    about = "Edit draw.io diagrams embedded in PNG images"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Extract editable, uncompressed XML from a draw.io PNG
+    Extract {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Embed XML into a PNG, rendering its first page unless --no-render is set
+    #[command(
+        after_help = "Desktop environment:\n  DIP_DRAWIO_PATH  Executable or wrapper path\n  DIP_DRAWIO_ARGS  Additional options with POSIX-style quoting (no shell expansion)"
+    )]
+    Embed {
+        /// XML file (omit to read stdin)
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Preserve this PNG's pixels; requires --no-render
+        #[arg(short, long, requires = "no_render")]
+        base_image: Option<PathBuf>,
+        /// Update metadata only; create a transparent 1x1 PNG if no base is given
+        #[arg(long)]
+        no_render: bool,
+        /// Debug only: skip draw.io XML validation
+        #[arg(long)]
+        no_validate: bool,
+    },
+    /// Validate XML or a draw.io PNG (all pages)
+    Validate { input: PathBuf },
+}
+
+fn run(cli: Cli) -> Result<()> {
+    match cli.command {
+        Command::Extract { input, output } => {
+            let data = storage::read(&input)?;
+            let xml = document::normalize(&png_data::extract(&data)?)?;
+            if let Some(path) = output {
+                storage::atomic_write(&path, xml.as_bytes())?;
+            } else {
+                io::stdout().lock().write_all(xml.as_bytes())?;
+            }
+        }
+        Command::Embed {
+            input,
+            output,
+            base_image,
+            no_render,
+            no_validate,
+        } => {
+            let bytes = if let Some(path) = input {
+                storage::read(&path)?
+            } else {
+                storage::read_limited(io::stdin().lock())?
+            };
+            let xml = document::utf8(&bytes)?;
+            let xml = if no_validate {
+                eprintln!("warning: draw.io XML validation is disabled");
+                xml.to_owned()
+            } else {
+                document::validate(xml)?;
+                document::normalize(xml)?
+            };
+            let base = if no_render {
+                eprintln!(
+                    "warning: PNG pixels are not synchronized with the diagram (--no-render)"
+                );
+                if let Some(path) = base_image {
+                    storage::read(&path)?
+                } else {
+                    png_data::transparent()?
+                }
+            } else {
+                render::render(&xml)?
+            };
+            let png = png_data::embed(&base, &xml)?;
+            storage::atomic_write(&output, &png)?;
+        }
+        Command::Validate { input } => {
+            let data = storage::read(&input)?;
+            let xml = if data.starts_with(png_data::SIGNATURE) {
+                png_data::extract(&data)?
+            } else {
+                document::utf8(&data)?.to_owned()
+            };
+            document::validate(&xml)?;
+        }
+    }
+    Ok(())
+}
+
+fn main() -> std::process::ExitCode {
+    match run(Cli::parse()) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
