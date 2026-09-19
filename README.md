@@ -95,3 +95,13 @@ DIP_TEST_DRAWIO_PATH=/path/to/drawio-or-wrapper \
 実装の参考にしたコードと fixture の説明は [tests/fixtures/README.md](tests/fixtures/README.md)、要件は [docs/prd.md](docs/prd.md) を参照してください。`.tmp` の参考リポジトリはビルドに使用しません。
 
 変更は作業ブランチで行い、Conventional Commits 形式でコミットします。
+
+## ライセンス
+
+本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。
+参考にした drawio-exporter の参照範囲・著作権表示・MIT ライセンス全文は
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) に記載しています。
+他の参照元と Cargo 依存ライブラリには、それぞれのライセンスが適用されます。
+
+ソース配布には `LICENSE` と `THIRD_PARTY_NOTICES.md` を含めます。
+バイナリアーカイブを作成する際も、この2ファイルを同梱してください。

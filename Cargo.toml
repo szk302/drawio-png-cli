@@ -3,6 +3,8 @@ name = "drawio-png-cli"
 version = "0.1.0"
 edition = "2024"
 description = "Extract, validate, and embed editable draw.io diagrams in PNG files"
+license = "MIT"
+repository = "https://github.com/szk302/drawio-png-cli"
 
 [[bin]]
 name = "dip"

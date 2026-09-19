@@ -15,3 +15,6 @@ The formats follow the locally inspected draw.io sources:
 - drawio `744cb5420`: `Editor.extractGraphModelFromPng`, `Editor.writeGraphModelToPng`, `Graph.compress`, and `Graph.decompress`.
 - drawio-desktop `60ec92a`: Desktop PNG export and CLI arguments.
 - drawio-exporter `68aa3df`: Desktop invocation and compatibility-test organization.
+
+Reference attribution and the drawio-exporter license text are recorded in
+[THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
