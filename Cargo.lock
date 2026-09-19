@@ -179,6 +179,7 @@ dependencies = [
  "clap",
  "crc32fast",
  "flate2",
+ "libc",
  "png",
  "roxmltree",
  "tempfile",

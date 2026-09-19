@@ -90,11 +90,21 @@ pub fn discover() -> Result<PathBuf> {
     )
 }
 
-struct ChildGuard(Child);
+struct ChildGuard {
+    child: Child,
+    finished: bool,
+}
 impl Drop for ChildGuard {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        if !self.finished {
+            #[cfg(unix)]
+            // The child starts a fresh process group; kill its helpers on timeout too.
+            unsafe {
+                libc::kill(-(self.child.id() as i32), libc::SIGKILL);
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
@@ -116,13 +126,19 @@ pub fn render_with(program: &Path, xml: &str, timeout: Duration) -> Result<Vec<u
     let output = directory.path().join("output.png");
     fs::write(&input, xml)?;
     let mut log = tempfile::tempfile()?;
-    let child = Command::new(program)
+    let mut command = Command::new(program);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let child = command
         .args([
             OsStr::new("--export"),
             OsStr::new("--format"),
             OsStr::new("png"),
             OsStr::new("--page-index"),
-            OsStr::new("0"),
+            OsStr::new("1"),
             OsStr::new("--output"),
         ])
         .arg(&output)
@@ -132,10 +148,14 @@ pub fn render_with(program: &Path, xml: &str, timeout: Duration) -> Result<Vec<u
         .stderr(Stdio::from(log.try_clone()?))
         .spawn()
         .with_context(|| format!("cannot start draw.io Desktop: {}", program.display()))?;
-    let mut child = ChildGuard(child);
+    let mut child = ChildGuard {
+        child,
+        finished: false,
+    };
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(status) = child.0.try_wait()? {
+        if let Some(status) = child.child.try_wait()? {
+            child.finished = true;
             ensure!(
                 status.success(),
                 "draw.io Desktop failed ({status}): {}",

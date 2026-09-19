@@ -17,6 +17,7 @@ fn parse(xml: &str) -> Result<Document<'_>> {
     // roxmltree parses Rust strings without checking the declared byte encoding.
     if let Some(decl) = xml
         .strip_prefix("<?xml")
+        .filter(|s| s.starts_with([' ', '\t', '\r', '\n']))
         .and_then(|s| s.split_once("?>").map(|p| p.0))
         && let Some((_, rest)) = decl.split_once("encoding")
     {
@@ -114,23 +115,23 @@ pub fn normalize(xml: &str) -> Result<String> {
             Ok(model[inner.root_element().range()].to_owned())
         })()
         .with_context(|| label.clone())?;
-        let children: Vec<_> = page.children().collect();
-        let start = children
-            .first()
-            .context("empty compressed page")?
-            .range()
-            .start;
-        let end = children
-            .last()
-            .context("empty compressed page")?
-            .range()
-            .end;
-        output_size = output_size - (end - start) + decoded.len();
+        let text_nodes: Vec<_> = page.children().filter(|n| n.is_text()).collect();
+        let removed: usize = text_nodes.iter().map(|n| n.range().len()).sum();
+        output_size = output_size - removed + decoded.len();
         ensure!(
             output_size <= MAX_BYTES,
             "expanded XML exceeds 64 MiB limit"
         );
-        replacements.push((start..end, decoded));
+        for (index, node) in text_nodes.into_iter().enumerate() {
+            replacements.push((
+                node.range(),
+                if index == 0 {
+                    decoded.clone()
+                } else {
+                    String::new()
+                },
+            ));
+        }
     }
     if let Some(attr) = root
         .attributes()
