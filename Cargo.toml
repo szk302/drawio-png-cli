@@ -1,0 +1,23 @@
+[package]
+name = "drawio-png-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Extract, validate, and embed editable draw.io diagrams in PNG files"
+
+[[bin]]
+name = "dip"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+crc32fast = "1"
+flate2 = "1"
+png = "0.18"
+roxmltree = "0.21"
+tempfile = "3"
+urlencoding = "2"
+
+[dev-dependencies]
+assert_cmd = "2"
