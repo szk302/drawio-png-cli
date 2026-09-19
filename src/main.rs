@@ -26,6 +26,9 @@ enum Command {
         output: Option<PathBuf>,
     },
     /// Embed XML into a PNG, rendering its first page unless --no-render is set
+    #[command(
+        after_help = "Desktop environment:\n  DIP_DRAWIO_PATH  Executable or wrapper path\n  DIP_DRAWIO_ARGS  Additional options with POSIX-style quoting (no shell expansion)"
+    )]
     Embed {
         /// XML file (omit to read stdin)
         #[arg(short, long)]

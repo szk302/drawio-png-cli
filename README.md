@@ -54,14 +54,38 @@ export DIP_DRAWIO_PATH=/Applications/draw.io.app/Contents/MacOS/draw.io
 
 明示指定が不正な場合、別の実行ファイルには切り替えません。描画のタイムアウトは 60 秒です。Desktop が見つからない場合や描画に失敗した場合はエラー終了し、既存出力は変更しません。Chrome フォールバックと `DIP_CHROME_PATH`／`CHROME_PATH` は初回実装の対象外です。
 
-Linux のディスプレイがない環境では、Xvfb などを用意し、`DIP_DRAWIO_PATH` にラッパーのパスを指定できます。
+Desktop の追加オプションは `DIP_DRAWIO_ARGS` に指定します。`DIP_DRAWIO_PATH` には実行ファイルのパスだけを指定してください。
+
+```sh
+export DIP_DRAWIO_PATH=/opt/drawio/drawio
+export DIP_DRAWIO_ARGS='--disable-gpu --disable-dev-shm-usage'
+
+# GUI のないコンテナでは、Xvfb 経由で dip を起動する
+xvfb-run -a dip embed -i diagram.xml -o diagram.drawio.png
+```
+
+Desktop のほかに `xvfb`・`xauth`、日本語を描画する場合は日本語フォントをコンテナに用意してください。`DIP_DRAWIO_ARGS` の指定だけでは仮想ディスプレイは起動しません。
+
+空白を含む値は引用符で囲みます。
+
+```sh
+export DIP_DRAWIO_ARGS='--disable-gpu --user-data-dir="/tmp/drawio profile"'
+```
+
+- 全 OS で POSIX シェル形式の引用符・バックスラッシュによる引数分割を使います。Windows のパスも引用符で囲むなど、この形式に合わせて指定してください。
+- シェルは起動せず、環境変数・`~`・ワイルドカード・コマンド置換は展開しません。必要な値は明示的に指定します。
+- 未設定・空文字・空白のみなら追加引数はありません。閉じていない引用符や Unicode として読めない値は、Desktop 起動前に終了コード `1` のエラーにします。
+- 追加引数は `dip` が生成する描画引数の前に渡します。入力ファイル、出力先、形式、ページ選択は `dip` が管理するため、これらを変更するオプションや `--` は指定しないでください。
+- `extract`・`validate`・`embed --no-render` は `DIP_DRAWIO_ARGS` を読みません。
+
+既存の Xvfb ラッパーを `DIP_DRAWIO_PATH` に指定する方法も使えます。ラッパーでは `"$@"` を転送してください。
 
 ```sh
 #!/bin/sh
 exec xvfb-run -a /opt/drawio/drawio "$@"
 ```
 
-`dip` は Electron の sandbox を自動で無効化しません。
+`dip` は Electron の sandbox を自動で無効化しません。テスト用コンテナで sandbox を無効化する必要がある場合は、`DIP_DRAWIO_ARGS` に `--no-sandbox` を明示的に追加できます。
 
 ## 検証・互換性・保存
 

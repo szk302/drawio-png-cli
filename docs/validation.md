@@ -47,3 +47,13 @@ Windows/macOS の実機確認と GitHub 上の CI 実行は、このローカル
 | `dip embed --no-render` | 3.38 ms | 3.82 ms |
 
 実行ファイルは 1,878,264 bytes。測定値はこの環境の小規模 fixture に対する参考値であり、大規模図面・コールドキャッシュ・Desktop の起動や描画時間を含まない。
+
+## 環境変数による Desktop オプション指定の追加
+
+`DIP_DRAWIO_ARGS` 対応後、通常テスト 33 件と Desktop 実機テスト 1 件が成功した。format・clippy・リリースビルドも成功した。
+
+- 未設定・空文字・空白、引用符・エスケープ、Unicode と空白を含む引数を確認した。
+- 環境変数・ワイルドカード・コマンド置換が展開されず、追加引数が描画引数の前にそのまま渡ることを確認した。
+- 引用符が不正な場合は Desktop が起動せず、既存出力が変化しないことを確認した。
+- `extract`・`validate`・`embed --no-render` は不正な `DIP_DRAWIO_ARGS` も読み取らないことを確認した。
+- 実機テストでは Xvfb の下でテストを実行し、`DIP_TEST_DRAWIO_PATH` に Desktop 本体を指定した。`DIP_DRAWIO_ARGS` から `--no-sandbox --disable-gpu --disable-dev-shm-usage` と空白を含む `--user-data-dir` を渡し、PNG の描画と Desktop での再読み込みが成功した。

@@ -115,12 +115,32 @@ fn log_excerpt(log: &mut File) -> String {
     String::from_utf8_lossy(&bytes).trim().to_owned()
 }
 
+fn parse_extra_args(value: Option<&OsStr>) -> Result<Vec<String>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let text = value
+        .to_str()
+        .context("DIP_DRAWIO_ARGS must be valid Unicode")?;
+    shell_words::split(text).context("invalid DIP_DRAWIO_ARGS: check quotes and escapes")
+}
+
 pub fn render(xml: &str) -> Result<Vec<u8>> {
-    render_with(&discover()?, xml, TIMEOUT)
+    let args = parse_extra_args(env::var_os("DIP_DRAWIO_ARGS").as_deref())?;
+    render_with_args(&discover()?, xml, TIMEOUT, &args)
 }
 
 /// Kept independent of discovery so renderer failures can be tested without Desktop.
 pub fn render_with(program: &Path, xml: &str, timeout: Duration) -> Result<Vec<u8>> {
+    render_with_args(program, xml, timeout, &[])
+}
+
+fn render_with_args(
+    program: &Path,
+    xml: &str,
+    timeout: Duration,
+    args: &[String],
+) -> Result<Vec<u8>> {
     let directory = tempfile::Builder::new().prefix("dip-render-").tempdir()?;
     let input = directory.path().join("input.drawio");
     let output = directory.path().join("output.png");
@@ -133,6 +153,7 @@ pub fn render_with(program: &Path, xml: &str, timeout: Duration) -> Result<Vec<u
         command.process_group(0);
     }
     let child = command
+        .args(args)
         .args([
             OsStr::new("--export"),
             OsStr::new("--format"),
@@ -184,4 +205,77 @@ pub fn render_with(program: &Path, xml: &str, timeout: Duration) -> Result<Vec<u
     })?;
     png_data::validate(&png).context("draw.io Desktop produced an invalid PNG")?;
     Ok(png)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_extra_args;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn optional_args_allow_quotes_and_escapes() {
+        assert!(parse_extra_args(None).unwrap().is_empty());
+        for value in ["", " \t\n"] {
+            assert!(
+                parse_extra_args(Some(OsStr::new(value)))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let args = parse_extra_args(Some(OsStr::new(
+            r#"--disable-gpu --user-data-dir="/tmp/日本語 profile" 'a b' escaped\ space "" 'C:\path with spaces'"#,
+        ))).unwrap();
+        assert_eq!(
+            args,
+            [
+                "--disable-gpu",
+                "--user-data-dir=/tmp/日本語 profile",
+                "a b",
+                "escaped space",
+                "",
+                r"C:\path with spaces"
+            ]
+        );
+    }
+
+    #[test]
+    fn args_are_not_shell_expanded() {
+        let args = parse_extra_args(Some(OsStr::new(
+            r#"'$HOME' "$(touch marker)" '`id`' *.xml ~/profile ; | >"#,
+        )))
+        .unwrap();
+        assert_eq!(
+            args,
+            [
+                "$HOME",
+                "$(touch marker)",
+                "`id`",
+                "*.xml",
+                "~/profile",
+                ";",
+                "|",
+                ">"
+            ]
+        );
+    }
+
+    #[test]
+    fn unmatched_quotes_are_errors() {
+        for value in ["'unfinished", "\"unfinished"] {
+            let error = parse_extra_args(Some(OsStr::new(value))).unwrap_err();
+            assert!(error.to_string().contains("DIP_DRAWIO_ARGS"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_unicode_args_are_errors() {
+        use std::os::unix::ffi::OsStrExt;
+        let error = parse_extra_args(Some(OsStr::from_bytes(b"\xff"))).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("DIP_DRAWIO_ARGS must be valid Unicode")
+        );
+    }
 }

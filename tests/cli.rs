@@ -9,7 +9,9 @@ const PLAIN: &[u8] = include_bytes!("fixtures/plain.png");
 
 fn dip() -> Command {
     let mut command = cargo_bin_cmd!("dip");
-    command.env_remove("DIP_DRAWIO_PATH");
+    command
+        .env_remove("DIP_DRAWIO_PATH")
+        .env_remove("DIP_DRAWIO_ARGS");
     command
 }
 
@@ -196,4 +198,30 @@ fn atomic_save_keeps_permissions() {
         fs::metadata(path).unwrap().permissions().mode() & 0o777,
         0o640
     );
+}
+
+#[test]
+fn commands_without_rendering_ignore_invalid_desktop_options() {
+    let directory = tempdir().unwrap();
+    let output = directory.path().join("output.png");
+    dip()
+        .env("DIP_DRAWIO_ARGS", "'unfinished")
+        .args(["embed", "--no-render", "-o"])
+        .arg(&output)
+        .write_stdin(MODEL)
+        .assert()
+        .success();
+    dip()
+        .env("DIP_DRAWIO_ARGS", "'unfinished")
+        .arg("validate")
+        .arg(&output)
+        .assert()
+        .success();
+    dip()
+        .env("DIP_DRAWIO_ARGS", "'unfinished")
+        .arg("extract")
+        .arg(&output)
+        .assert()
+        .success()
+        .stdout(MODEL);
 }

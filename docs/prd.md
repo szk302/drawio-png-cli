@@ -157,11 +157,26 @@ dip validate output.drawio.png
 
 * Desktop の検索順: `DIP_DRAWIO_PATH` → PATH の `drawio` / `draw.io` → OS 標準インストール先。
 * `DIP_DRAWIO_PATH` の明示指定が不正な場合はエラーとし、別の候補には切り替えない。
+* `DIP_DRAWIO_ARGS` で Desktop の追加オプションを指定できる。`DIP_DRAWIO_PATH` は実行ファイルのパスのみを受け付ける。
+* `DIP_DRAWIO_ARGS` は全 OS 共通の POSIX シェル形式で引用符・バックスラッシュを処理して引数へ分割する。シェル実行、環境変数展開、コマンド置換、ホームディレクトリ展開、glob 展開は行わない。
+* 未設定・空文字・空白のみは追加引数なし。閉じていない引用符または Unicode として読めない環境変数は Desktop 起動前に終了コード `1` でエラーにし、既存出力を維持する。
+* 追加引数は `dip` が生成する描画引数の前に渡す。入力ファイル・出力先・形式・ページ選択は `dip` が管理し、これらを変更する追加オプションや `--` の指定はサポートしない。
+* `extract`・`validate`・`embed --no-render` は `DIP_DRAWIO_ARGS` を読み取らない。
 * 一時ファイルへ先頭ページを描画し、全ページの XML は `dip` が PNG に埋め込む。
 * 描画は 60 秒でタイムアウトする。Desktop がない場合・描画失敗時はエラー終了する。
 * `--no-render` では Desktop を検索・起動せず、ベース画像または新規透明 PNG にメタデータを保存する。
 * Linux のディスプレイがない環境では利用者が Xvfb 等を用意する。`dip` は sandbox を自動無効化しない。
 * `DIP_CHROME_PATH` / `CHROME_PATH` は将来の Chrome 対応時に導入する。
+
+コンテナでの指定例（Desktop・Xvfb・xauth のインストールが必要）:
+
+```sh
+export DIP_DRAWIO_PATH=/opt/drawio/drawio
+export DIP_DRAWIO_ARGS='--disable-gpu --disable-dev-shm-usage'
+xvfb-run -a dip embed -i diagram.xml -o diagram.drawio.png
+```
+
+追加オプションは仮想ディスプレイを起動しない。Xvfb を `dip` の外側で起動するか、`DIP_DRAWIO_PATH` に `"$@"` を転送するラッパーを指定する。
 
 ---
 
@@ -183,6 +198,7 @@ dip validate output.drawio.png
 * `base64`, `urlencoding`: メタデータのエンコード・デコード処理
 * `roxmltree`: XML の検証とソース範囲に基づくページ展開。全体の再シリアライズを避け、未知要素や属性を保持する
 * `tempfile`: 同一ディレクトリでのアトミック保存と描画用一時ファイル
+* `shell-words`: `DIP_DRAWIO_ARGS` の引用符・エスケープを含む引数分割
 
 ---
 

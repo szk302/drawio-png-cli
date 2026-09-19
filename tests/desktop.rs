@@ -45,7 +45,9 @@ fn real_desktop_renders_first_page_and_preserves_all_pages() {
 
     // Desktop must itself reopen the generated PNG and recover both pages.
     let reopened = directory.path().join("reopened.xml");
+    let extra_args = shell_words::split(&env::var("DIP_DRAWIO_ARGS").unwrap_or_default()).unwrap();
     assert_cmd::Command::new(renderer)
+        .args(extra_args)
         .timeout(Duration::from_secs(60))
         .args(["--export", "--format", "xml", "--uncompressed", "--output"])
         .arg(&reopened)
