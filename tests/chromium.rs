@@ -153,8 +153,12 @@ fn real_chromium_renders_first_page_and_preserves_xml() {
 
     // Desktop 31.4.5 exports this font-independent rectangle at 104x44.
     let geometry = r##"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" vertex="1" parent="1" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></root></mxGraphModel>"##;
-    let (width, height, _) = pixels(&render(geometry, None, false).unwrap());
-    assert_eq!((width, height), (104, 44));
+    let actual = pixels(&render(geometry, None, false).unwrap());
+    assert_eq!((actual.0, actual.1), (104, 44));
+    assert_eq!(
+        actual,
+        pixels(include_bytes!("fixtures/geometry-desktop.png"))
+    );
 }
 
 #[test]
@@ -215,6 +219,14 @@ fn real_chromium_local_assets_and_unsupported_content() {
     assert!(format!("{:#}", render(&math, None, false).unwrap_err()).contains("Math"));
     let huge = MODEL.replace("width=\"100\"", "width=\"20000000\"");
     assert!(render(&huge, None, false).is_err());
+    // The final 3004x1504 PNG fits in 64 MiB, but its 2x capture does not.
+    let capture_too_large = MODEL
+        .replace("width=\"100\"", "width=\"3000\"")
+        .replace("height=\"40\"", "height=\"1500\"");
+    assert!(
+        format!("{:#}", render(&capture_too_large, None, false).unwrap_err())
+            .contains("2x Chromium capture")
+    );
     let broken_image = MODEL.replace(
         "vertex=\"1\"",
         "vertex=\"1\" style=\"shape=image;image=data:image/png,aW52YWxpZA==;\"",

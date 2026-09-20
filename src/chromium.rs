@@ -2,8 +2,8 @@
 use crate::{
     MAX_BYTES,
     chromium_assets::AssetServer,
-    png_data,
     render::{ChildGuard, TIMEOUT, executable, log_excerpt},
+    resample,
 };
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -255,7 +255,7 @@ pub fn render_with(
         )?;
         cdp.call(
             "Emulation.setDeviceMetricsOverride",
-            json!({"width":800,"height":600,"deviceScaleFactor":1,"mobile":false}),
+            json!({"width":800,"height":600,"deviceScaleFactor":resample::SCALE,"mobile":false}),
         )?;
         let navigation = cdp.call(
             "Page.navigate",
@@ -296,13 +296,10 @@ pub fn render_with(
         };
         let width = dimension(&bounds, "width", "x")?;
         let height = dimension(&bounds, "height", "y")?;
-        ensure!(
-            (width as u64) * (height as u64) * 4 <= MAX_BYTES as u64,
-            "decoded PNG exceeds 64 MiB limit"
-        );
+        resample::capture_size(width, height)?;
         cdp.call(
             "Emulation.setDeviceMetricsOverride",
-            json!({"width":width,"height":height,"deviceScaleFactor":1,"mobile":false}),
+            json!({"width":width,"height":height,"deviceScaleFactor":resample::SCALE,"mobile":false}),
         )?;
         cdp.call("Runtime.evaluate", json!({"expression":"document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))", "awaitPromise":true}))?;
         cdp.eval("true")?;
@@ -317,8 +314,7 @@ pub fn render_with(
         let png = STANDARD
             .decode(data)
             .context("invalid Chromium PNG encoding")?;
-        png_data::validate(&png).context("Chromium produced an invalid PNG")?;
-        Ok(png)
+        resample::half_png(&png, width, height, deadline).context("cannot resize Chromium PNG")
     })();
     result.with_context(|| format!("Chromium rendering failed: {}", log_excerpt(&mut log)))
 }

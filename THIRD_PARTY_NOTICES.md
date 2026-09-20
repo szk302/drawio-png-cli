@@ -5,6 +5,26 @@ Third-party works retain their own copyright notices and license terms.
 This file documents implementation references; it is not an exhaustive license
 inventory of Cargo dependencies.
 
+## Chromium-compatible image resizing
+
+`src/resample.rs` adapts the Hamming1 filter generation and fixed-point channel
+rounding used by Chromium's `skia/ext/image_operations.cc` (Copyright 2012 The
+Chromium Authors) and `skia/ext/convolver.{cc,h}` (Copyright 2011 The Chromium
+Authors), reviewed at Chromium `152.0.7977.76`. The Rust implementation is limited
+to 2:1 downsampling and uses bounded edge/interior kernel storage. It is licensed
+under BSD-3-Clause; the full license is in
+[`assets/licenses/chromium-BSD-3-Clause.txt`](assets/licenses/chromium-BSD-3-Clause.txt)
+and is also printed by `dip licenses`.
+
+The behavior reference is Electron `v44.2.0`
+[`NativeImage::Resize`](https://github.com/electron/electron/blob/v44.2.0/shell/common/api/electron_api_native_image.cc),
+whose `good` and `better` quality settings use Chromium's Hamming1 path. The
+choice was verified against draw.io Desktop 31.4.5's actual capture output on a
+1x Linux display; capture has already downsampled before Desktop calls resize.
+No Electron code or runtime is bundled for this feature.
+
+Retain this notice and the BSD license in source and binary distributions.
+
 ## drawio-exporter
 
 - Project: https://github.com/rlespinasse/drawio-exporter

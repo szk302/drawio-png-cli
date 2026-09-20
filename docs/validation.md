@@ -111,3 +111,35 @@ DIP_TEST_DRAWIO_PATH=/absolute/path/to/drawio-wrapper \
   mise exec -- cargo test --locked --test desktop --test fonts --test chromium \
   -- --ignored --nocapture --test-threads=1
 ```
+
+## 描画解像度と縮小処理の統一
+
+2026-09-20、ChromiumをDPR 2で描画し、Hamming1方式で縦横それぞれ半分へ縮小するよう変更した。比較対象はDesktop 31.4.5 / Electron 44.2.0 / Chromium 152と、CLI側のChromium 153.0.8010.47。Linux ARM64、1倍表示のXvfbで検証した。方式選定の実測と上流参照は [rendering.md](rendering.md) に記載している。
+
+同じ入力で再比較した結果は次のとおり。「共通フォント」は `--default-font 'Noto Sans CJK JP' --fallback-font 'Noto Sans CJK JP'` を両方に指定した結果。異なる寸法の画像では画素差を集計していない。
+
+| 図面 | フォント指定 | Desktop寸法 | Chromium寸法 | RGBAが異なる画素数 |
+| --- | --- | --- | --- | --- |
+| 文字なし矩形 | なし／共通 | 104×44 | 104×44 | 0 |
+| HTMLラベル | なし | 244×84 | 244×84 | 994 |
+| HTMLラベル | 共通 | 244×84 | 244×84 | 761 |
+| 日本語・英数字ラベル | なし | 131×44 | 149×44 | — |
+| 日本語・英数字ラベル | 共通 | 131×44 | 132×44 | — |
+| 複数ページ | なし | 131×44 | 149×44 | — |
+| 複数ページ | 共通 | 131×44 | 132×44 | — |
+
+全ケースで抽出XMLはレンダラー間で一致した。文字なし矩形は寸法だけでなくRGBAも一致するようになった。文字部分の差と共通フォント指定時の幅1pxの差は残り、解像度・縮小方式の統一だけでは解消しない。
+
+- Electronで独立生成した半透明・画像端を含む縮小fixtureとRustの出力RGBAが一致した。
+- 小さい画像・縦長・横長画像、透明色、取得画像の容量制限、寸法不一致、期限切れを通常テストで確認した。
+- 実機テストにDesktopの文字なし矩形とのRGBA比較と、最終画像は64 MiB以内でも2倍取得が上限を超える図面の拒否を追加した。
+- 取得前のRGBAバッファを64 MiB以内に制限するため、Chromiumの最終出力上限は4,194,304画素となる。
+- 通常テスト51件、Chromium実機4件・Desktop実機1件・共通フォント実機1件が成功した。format・clippy・releaseビルドも成功した。実機テストのコマンドと追加引数は直前のフォント検証と同じ。
+
+比較画像と集計はローカルの `.tmp/resampling/final/` に保存した。回帰テスト用の基準画像は `tests/fixtures/` に保存し、生成条件も記録した。macOS/Windows実機とHiDPI表示は今回の検証に含まない。
+
+## VS Code draw.io拡張のPNG保存との比較
+
+2026-09-20、ローカルの拡張コードと固定されたdraw.ioサブモジュールを使い、拡張のWebview HTMLと `xmlpng` 保存経路をChromiumで再現した。9入力すべてでDesktop／CLI Chromiumと出力寸法が異なり、文字なし矩形も拡張102×42、CLI104×44となった。単純な余白除去後も画素差が残った。拡張経路のDPR 1／2間では全9件のRGBAが一致した。
+
+CLI生成PNGを拡張経路で再読み込み・再保存する18件も成功し、XMLを直接読み込んだ拡張出力とのRGBA一致、再保存PNGからのXML抽出・検証、複数ページの保持を確認した。VS Code本体での実機検証は含まない。詳細と再現条件は [VS Code拡張とのPNG互換性](vscode-rendering.md) を参照。CLIの描画実装はこの調査では変更していない。

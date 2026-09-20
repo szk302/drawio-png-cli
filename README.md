@@ -44,7 +44,7 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 
 `embed --renderer auto|desktop|chromium` で選択します。既定の `auto` は Desktop を優先し、見つからない場合だけ Chromium に切り替えます。明示パスが不正な場合や描画に失敗した場合は切り替えず、既存出力を保持してエラー終了します。
 
-Chromiumの出力サイズはDesktopと同じく、描画範囲の右端・下端を切り上げて縦横に1pxを追加します。ただし、実際に使われるフォントや文字幅の計測が異なると、描画範囲と出力サイズにも差が生じます。また、Desktopの縮小処理などにより画素は完全一致しません。
+Chromiumの出力サイズはDesktopと同じく、描画範囲の右端・下端を切り上げて縦横に1pxを追加します。DPR 2で描画し、取得画像をHamming1方式で縦横それぞれ半分に縮小します。これはDesktop 31.4.5を1倍表示のLinux環境で実測した結果に合わせたものです。フォント・ブラウザーバージョン・Desktop側の表示倍率が異なる場合は、寸法や画素の完全一致を保証しません。詳細は [描画互換性](docs/rendering.md) を参照してください。
 
 ```sh
 dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
@@ -167,7 +167,7 @@ exec xvfb-run -a /opt/drawio/drawio "$@"
 - `tEXt`／`zTXt` の `mxfile`／`mxGraphModel` を読み取り、旧 Desktop の raw DEFLATE、URL エンコードの二重化にも対応します。競合する複数の図面メタデータは拒否します。
 - 抽出時は全ページを非圧縮 XML にします。ページ順・名前・属性・未知要素を保持しますが、元の XML 文字列との完全一致は保証しません。
 - 保存時は既存の図面メタデータを置換し、URL エンコードした XML を一つの `tEXt` チャンクへ格納します。ベース画像の画像データ・無関係なチャンクは保持します。
-- 入力、展開データ、出力 PNG、デコード後の画像バッファに 64 MiB の上限があります。DTD と外部エンティティは受け付けません。
+- 入力、展開データ、出力 PNG、デコード後の画像バッファに 64 MiB の上限があります。Chromiumでは縮小前の2倍画像にもこの制限を適用するため、最終画像は最大4,194,304画素です。DTD と外部エンティティは受け付けません。
 - 出力先と同じディレクトリの一時ファイルに保存・同期後、アトミックに置換します。既存ファイルの権限を引き継ぎ、失敗時の一時ファイルは片付けます。出力先ディレクトリは事前に作成してください。
 - `--no-validate` はデバッグ用です。XML の構造検証・正規化を省略し、不正な XML も埋め込めます。UTF-8・サイズ制限・PNG 検査・アトミック保存は維持します。
 
@@ -204,11 +204,11 @@ Linux CIではChromium実機テストも実行します。資材ハッシュの�
 
 ## ライセンス
 
-本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。Cargoのライセンス表記は同梱描画資材を含めて `MIT AND Apache-2.0 AND Zlib` としています。
+本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。Chromiumを参考に移植した縮小処理はBSD-3-Clauseです。Cargoのライセンス表記は同梱描画資材と縮小処理を含めて `MIT AND Apache-2.0 AND Zlib AND BSD-3-Clause` としています。
 参考にした drawio-exporter の参照範囲・著作権表示・MIT ライセンス全文は
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) に記載しています。
 他の参照元と Cargo 依存ライブラリには、それぞれのライセンスが適用されます。
 
 ソース配布には `LICENSE` と `THIRD_PARTY_NOTICES.md` を含めます。
-バイナリアーカイブを作成する際も、この2ファイルと `assets/drawio/README.md`・`assets/drawio/licenses/` を同梱してください。
+バイナリアーカイブを作成する際も、この2ファイルと `assets/drawio/README.md`・`assets/drawio/licenses/`・`assets/licenses/` を同梱してください。
 同梱描画資材は各資材のライセンスに従います。対象と除外範囲は [資材一覧](assets/drawio/README.md) に記録しています。`dip licenses` で同梱描画資材の表示・ライセンス全文を確認できます。

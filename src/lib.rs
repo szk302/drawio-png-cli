@@ -4,13 +4,16 @@ pub mod document;
 pub mod fonts;
 pub mod png_data;
 pub mod render;
+mod resample;
 pub mod storage;
 
 pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 
-/// Notices for the JavaScript renderer embedded in the binary.
+/// Notices for the bundled renderer and Chromium-compatible resampling.
 pub const BUNDLED_LICENSES: &str = concat!(
     include_str!("../assets/drawio/README.md"),
+    "\n\n--- Chromium resampling (Copyright 2011, 2012 The Chromium Authors) ---\n",
+    include_str!("../assets/licenses/chromium-BSD-3-Clause.txt"),
     "\n\n--- DOMPurify-Apache-2.0.txt ---\n",
     include_str!("../assets/drawio/licenses/DOMPurify-Apache-2.0.txt"),
     "\n\n--- drawio-Apache-2.0.txt ---\n",
