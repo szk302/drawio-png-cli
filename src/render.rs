@@ -14,7 +14,7 @@ use crate::{MAX_BYTES, png_data, storage};
 
 pub const TIMEOUT: Duration = Duration::from_secs(60);
 
-fn executable(path: &Path) -> bool {
+pub(crate) fn executable(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };
@@ -33,6 +33,10 @@ fn executable(path: &Path) -> bool {
 }
 
 pub fn discover() -> Result<PathBuf> {
+    discover_optional()?.context("draw.io Desktop not found; install it or set DIP_DRAWIO_PATH")
+}
+
+pub(crate) fn discover_optional() -> Result<Option<PathBuf>> {
     if let Some(path) = env::var_os("DIP_DRAWIO_PATH") {
         let path = PathBuf::from(path);
         ensure!(
@@ -42,6 +46,7 @@ pub fn discover() -> Result<PathBuf> {
         );
         return path
             .canonicalize()
+            .map(Some)
             .context("cannot resolve DIP_DRAWIO_PATH");
     }
     let names: &[&str] = if cfg!(windows) {
@@ -54,7 +59,7 @@ pub fn discover() -> Result<PathBuf> {
             for name in names {
                 let candidate = directory.join(name);
                 if executable(&candidate) {
-                    return Ok(candidate.canonicalize()?);
+                    return Ok(Some(candidate.canonicalize()?));
                 }
             }
         }
@@ -82,17 +87,15 @@ pub fn discover() -> Result<PathBuf> {
     }
     for path in defaults {
         if executable(&path) {
-            return Ok(path);
+            return Ok(Some(path));
         }
     }
-    bail!(
-        "draw.io Desktop not found; install it or set DIP_DRAWIO_PATH, or use --no-render (Chrome fallback is not yet supported)"
-    )
+    Ok(None)
 }
 
-struct ChildGuard {
-    child: Child,
-    finished: bool,
+pub(crate) struct ChildGuard {
+    pub(crate) child: Child,
+    pub(crate) finished: bool,
 }
 impl Drop for ChildGuard {
     fn drop(&mut self) {
@@ -108,7 +111,7 @@ impl Drop for ChildGuard {
     }
 }
 
-fn log_excerpt(log: &mut File) -> String {
+pub(crate) fn log_excerpt(log: &mut File) -> String {
     let _ = log.seek(SeekFrom::Start(0));
     let mut bytes = Vec::new();
     let _ = log.take(8192).read_to_end(&mut bytes);
@@ -128,6 +131,39 @@ fn parse_extra_args(value: Option<&OsStr>) -> Result<Vec<String>> {
 pub fn render(xml: &str) -> Result<Vec<u8>> {
     let args = parse_extra_args(env::var_os("DIP_DRAWIO_ARGS").as_deref())?;
     render_with_args(&discover()?, xml, TIMEOUT, &args)
+}
+
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+pub enum Renderer {
+    #[default]
+    Auto,
+    Desktop,
+    Chromium,
+}
+
+pub fn render_selected(xml: &str, renderer: Renderer, allow_network: bool) -> Result<Vec<u8>> {
+    match renderer {
+        Renderer::Desktop => {
+            ensure!(
+                !allow_network,
+                "--allow-network requires the Chromium renderer"
+            );
+            render(xml)
+        }
+        Renderer::Chromium => crate::chromium::render(xml, allow_network),
+        Renderer::Auto => {
+            if let Some(program) = discover_optional()? {
+                ensure!(
+                    !allow_network,
+                    "Desktop was selected; use --renderer chromium with --allow-network"
+                );
+                let args = parse_extra_args(env::var_os("DIP_DRAWIO_ARGS").as_deref())?;
+                render_with_args(&program, xml, TIMEOUT, &args)
+            } else {
+                crate::chromium::render(xml, allow_network)
+            }
+        }
+    }
 }
 
 /// Kept independent of discovery so renderer failures can be tested without Desktop.

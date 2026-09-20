@@ -23,4 +23,12 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+      - name: Verify bundled assets
+        run: python scripts/vendor_drawio.py --check
+      - name: Test headless Chromium rendering
+        if: runner.os == 'Linux'
+        env:
+          DIP_TEST_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+        run: |
+          DIP_TEST_CHROME_PATH="$(command -v google-chrome)" cargo test --locked --test chromium -- --ignored --nocapture
       - run: cargo build --release --locked

@@ -58,7 +58,27 @@ SOFTWARE.
   [Upstream license: Apache-2.0](https://github.com/jgraph/drawio-desktop/blob/60ec92a/LICENSE).
 
 The local reference checkouts and Desktop test installation in `.tmp/` are not
-included in this project's source package. dip calls a separately installed
-Desktop executable; it does not bundle the application or draw.io rendering
-assets. The test diagrams and PNG fixtures were generated for this project;
+included in this project's source package. dip calls a separately installed Desktop or Chromium executable.
+The Chromium renderer bundles the limited subset described below. The test diagrams and PNG fixtures were generated for this project;
 see [the fixture provenance](tests/fixtures/README.md).
+
+## Bundled Chromium renderer assets
+
+The Chromium renderer embeds an unmodified, gzip-compressed subset of draw.io
+at revision `744cb5420fdf126efd7a09b1d7082ca3e12c0841`. This differs from the
+reference-only use of the Desktop checkout described above.
+
+See [the asset inventory](assets/drawio/README.md),
+[the source/hash manifest](assets/drawio/manifest.json), and
+[full license texts](assets/drawio/licenses/). The bundle includes Apache-2.0,
+MIT and Zlib works; those assets are not relicensed under dip's MIT license.
+Separately restricted additional icon/stencil packs and their compiled bundles
+are excluded. All retained notices and license texts are accessible in standalone
+binaries through `dip licenses`.
+
+Binary archives must retain this file, `LICENSE`, `assets/drawio/README.md` and
+`assets/drawio/licenses/`. No runtime or build-time asset download is performed.
+
+The headless export integration also consulted jgraph/draw-image-export2's
+`export.js` for its `render` / `LoadingComplete` protocol and screenshot sizing.
+No server source or Node.js dependencies from that project are bundled.

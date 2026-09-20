@@ -151,9 +151,9 @@ dip validate output.drawio.png
 
 ---
 
-## 6. レンダリング戦略（初回実装）
+## 6. レンダリング戦略
 
-初回は draw.io Desktop 27.0.2 以降による描画に対応する。先頭ページは 1-based の `--page-index 1` で指定する。Chrome / Chromium フォールバックは次段階に分ける。
+draw.io Desktop 27.0.2 以降と Chromium / Chrome のヘッドレス描画に対応する。Desktopの先頭ページは 1-based の `--page-index 1`、Web描画APIは `from: 0, to: 0` で指定する。
 
 * Desktop の検索順: `DIP_DRAWIO_PATH` → PATH の `drawio` / `draw.io` → OS 標準インストール先。
 * `DIP_DRAWIO_PATH` の明示指定が不正な場合はエラーとし、別の候補には切り替えない。
@@ -163,10 +163,17 @@ dip validate output.drawio.png
 * 追加引数は `dip` が生成する描画引数の前に渡す。入力ファイル・出力先・形式・ページ選択は `dip` が管理し、これらを変更する追加オプションや `--` の指定はサポートしない。
 * `extract`・`validate`・`embed --no-render` は `DIP_DRAWIO_ARGS` を読み取らない。
 * 一時ファイルへ先頭ページを描画し、全ページの XML は `dip` が PNG に埋め込む。
-* 描画は 60 秒でタイムアウトする。Desktop がない場合・描画失敗時はエラー終了する。
+* 描画は 60 秒でタイムアウトする。選択可能なレンダラーがない場合・描画失敗時はエラー終了する。
 * `--no-render` では Desktop を検索・起動せず、ベース画像または新規透明 PNG にメタデータを保存する。
 * Linux のディスプレイがない環境では利用者が Xvfb 等を用意する。`dip` は sandbox を自動無効化しない。
-* `DIP_CHROME_PATH` / `CHROME_PATH` は将来の Chrome 対応時に導入する。
+* `embed --renderer auto|desktop|chromium` を提供し、既定は `auto`。Desktopが見つからないときだけChromiumへ切り替え、明示指定の不正や描画失敗では切り替えない。
+* Chromiumの検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS標準パス。`DIP_CHROME_ARGS` はPOSIX形式で分割し、シェルを起動しない。
+* Chromiumは基本描画資材をバイナリに同梱し、`DIP_DRAWIO_WEB_PATH` で `export3.html` を含むローカルWeb資材を指定できる。不正指定ではエラーとし、資材の自動取得はしない。
+* 同梱対象は基本図形・接続線・日本語・HTMLラベル・埋め込み画像。追加アイコン・ステンシル、数式・Mermaid・自動レイアウト資材は除外。必要資材が欠ける図面や未知の図形ではエラーにする。
+* 外部HTTP(S)画像・フォント等の取得は既定で禁止。Chromium専用の `--allow-network` で許可できる。`--renderer` / `--allow-network` と `--no-render` は引数エラー。
+* RustからCDPで専用プロファイルのChromiumを制御し、ループバックの資材サーバーを使用する。起動からPNG取得まで60秒。タイムアウト・失敗時もブラウザーとサーバーを片付け、既存出力を維持する。
+* 資材のライセンス・出典・ハッシュを記録する。`dip licenses` で同梱資材の表示・全文を取得可能とする。
+* `embed --default-font FAMILY` と繰り返し指定可能な `--fallback-font FAMILY` により、両レンダラーへ渡すセルのフォント候補を統一できる。既存の明示指定を優先し、設定を全ページの埋め込みXMLにも保存する。省略時は従来の動作を保持し、特定の日本語フォントを強制しない。適用範囲と互換性は [フォント指定の仕様](fonts.md) に従う。
 
 コンテナでの指定例（Desktop・Xvfb・xauth のインストールが必要）:
 

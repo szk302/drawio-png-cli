@@ -57,3 +57,57 @@ Windows/macOS の実機確認と GitHub 上の CI 実行は、このローカル
 - 引用符が不正な場合は Desktop が起動せず、既存出力が変化しないことを確認した。
 - `extract`・`validate`・`embed --no-render` は不正な `DIP_DRAWIO_ARGS` も読み取らないことを確認した。
 - 実機テストでは Xvfb の下でテストを実行し、`DIP_TEST_DRAWIO_PATH` に Desktop 本体を指定した。`DIP_DRAWIO_ARGS` から `--no-sandbox --disable-gpu --disable-dev-shm-usage` と空白を含む `--user-data-dir` を渡し、PNG の描画と Desktop での再読み込みが成功した。
+
+## Chromium 描画対応
+
+2026-09-19、Linux ARM64、Rust 1.98.1、`/usr/bin/chromium`
+（Chromium 153.0.8010.47）で検証した。実機テストでは追加引数やXvfbを使用せず、sandboxを有効にした状態で成功した。
+
+- 通常テスト41件が成功。Chromium実機テスト4件も明示実行して成功した。
+- 先頭ページの画素一致、全ページXMLの保持、日本語・HTMLラベル、埋め込み画像を確認した。
+- 同梱資材とローカル資材の描画、未知の図形・数式・資材欠落・壊れた埋め込み画像・過大画像の拒否を確認した。
+- 外部画像は既定で接続せず失敗し、明示許可時は取得して埋め込み画像と同じ画素になることを確認した。
+- ブラウザー起動前の設定エラー、追加引数の引用符とシェル非展開、既存出力の保護、起動待機中とJavaScript実行中のタイムアウト、Unix補助プロセス・プロファイルの片付けを検証した。
+- 上流Webアプリの `src/main/webapp` を直接指定する手動描画も成功した。
+- releaseバイナリをリポジトリ外の一時ディレクトリへコピーし、DesktopからChromiumへの自動フォールバック、同梱資材による描画、2ページの抽出・再検証が成功した。
+- format、Linuxのclippy、releaseビルド、資材ハッシュ確認が成功。Windows GNUターゲットの全ターゲットcheck・clippyも成功した。
+- `cargo package --allow-dirty --offline` による配布物の検証ビルドが成功し、`.tmp` の参考チェックアウトに依存しないことを確認した。最初のワークスペース内ビルドではオブジェクトファイル作成時にPermission deniedが発生したため、`CARGO_TARGET_DIR=/tmp/dip-package-verification-target` で独立したビルド先を使って検証した。
+
+```sh
+DIP_TEST_CHROME_PATH=/usr/bin/chromium \
+  mise exec -- cargo test --locked --test chromium -- --ignored --nocapture
+python3 scripts/vendor_drawio.py --check
+```
+
+Desktopの既存通常テストは成功したが、今回の変更でDesktop実機テストは再実行していない。macOS/Windowsでのブラウザー実機検証とGitHub上のCI実行は、このローカル検証には含まない。
+
+## DesktopとChromiumの出力サイズ計算の統一
+
+2026-09-20、Chromiumの画像サイズをDesktopと同じ `ceil(bounds.size + bounds.offset) + 1` に変更した。追加後の寸法に対して画像バッファの64 MiB制限を適用する。
+
+- 文字なしの100×40の矩形について、Desktop 31.4.5の出力寸法104×44をChromium実機テストに追加した。変更前は103×43で失敗し、変更後は成功した。
+- 通常テスト41件、Chromium実機テスト4件、format・clippyが成功した。実機テストは `/usr/bin/chromium`、`DIP_TEST_CHROME_ARGS=--disable-dev-shm-usage`、`--test-threads=1` で実行した。
+- 比較用画像を再描画し、文字なし図形104×44とHTMLラベル244×84が、既存のDesktop出力と同じ寸法になることを確認した。4例とも抽出XMLは一致した。
+- 日本語と英数字・記号を含むプレーンテキストの例は、Desktop 131×44に対しChromium 149×44となる。実際に選択されるフォントが異なるため、寸法計算の統一だけでは文字を含むすべての図面のサイズ一致を保証しない。
+- DPR・縮小方式は変更していないため、寸法が一致しても画素の完全一致は保証しない。
+
+## 既定フォント・代替フォントの指定
+
+2026-09-20、`--default-font` と `--fallback-font` を追加した。仕様は [fonts.md](fonts.md) に記載している。
+
+- 通常テスト48件が成功。複数ページとユーザーオブジェクト、明示フォントの優先、代替候補の順序・重複除去、HTML・Webフォント・未知要素の保持、XMLサイズ制限、保存失敗時の保護を確認した。
+- Desktopに渡すXMLとPNGに保存するXMLが一致し、全ページに設定が残ることを確認した。
+- Desktop 31.4.5とChromiumを使うフォント実機テストが成功した。共通フォントはNoto Sans CJK JPを指定。各レンダラー内で、既定フォントによる描画、存在しないフォントからの明示的な代替、既存指定を優先した描画が、XMLへフォントを直接指定した基準画像と同じ画素になった。
+- 既存のChromium実機テスト4件とDesktop実機テスト1件も成功した。
+- format・clippyが成功した。実機検証はLinuxで、Desktopは既存のXvfbラッパーを使用。両レンダラーに `--disable-dev-shm-usage` を追加して順次実行した。
+- フォント候補の統一は描画方式の統一ではない。今回の日本語ラベルでは、同じNoto Sans CJK JPを候補に指定してもDesktop 131×44、Chromium 132×44の1px差が残る。macOS/Windowsの実フォント選択は今回検証していない。
+
+```sh
+DIP_TEST_DRAWIO_PATH=/absolute/path/to/drawio-wrapper \
+  DIP_DRAWIO_ARGS=--disable-dev-shm-usage \
+  DIP_TEST_CHROME_PATH=/usr/bin/chromium \
+  DIP_TEST_CHROME_ARGS=--disable-dev-shm-usage \
+  DIP_TEST_FONT='Noto Sans CJK JP' \
+  mise exec -- cargo test --locked --test desktop --test fonts --test chromium \
+  -- --ignored --nocapture --test-threads=1
+```

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use drawio_png_cli::{document, png_data, render, storage};
+use drawio_png_cli::{document, fonts, png_data, render, storage};
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -19,6 +19,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print bundled renderer notices and full license texts
+    Licenses,
     /// Extract editable, uncompressed XML from a draw.io PNG
     Extract {
         input: PathBuf,
@@ -27,7 +29,7 @@ enum Command {
     },
     /// Embed XML into a PNG, rendering its first page unless --no-render is set
     #[command(
-        after_help = "Desktop environment:\n  DIP_DRAWIO_PATH  Executable or wrapper path\n  DIP_DRAWIO_ARGS  Additional options with POSIX-style quoting (no shell expansion)"
+        after_help = "Renderer environment:\n  DIP_DRAWIO_PATH / DIP_DRAWIO_ARGS  Desktop executable and options\n  DIP_CHROME_PATH / CHROME_PATH     Chromium or Chrome executable\n  DIP_CHROME_ARGS                   Additional POSIX-quoted options (no shell expansion)\n  DIP_DRAWIO_WEB_PATH               Local draw.io webapp directory (default: bundled assets)"
     )]
     Embed {
         /// XML file (omit to read stdin)
@@ -41,6 +43,18 @@ enum Command {
         /// Update metadata only; create a transparent 1x1 PNG if no base is given
         #[arg(long)]
         no_render: bool,
+        /// Rendering backend (auto prefers Desktop, then Chromium)
+        #[arg(long, value_enum, conflicts_with = "no_render")]
+        renderer: Option<render::Renderer>,
+        /// Allow external HTTP(S) images and fonts in Chromium
+        #[arg(long, conflicts_with = "no_render")]
+        allow_network: bool,
+        /// Set and save the font for cells without an explicit fontFamily
+        #[arg(long, value_parser = fonts::parse_family, conflicts_with = "no_validate")]
+        default_font: Option<String>,
+        /// Append a fallback family (repeatable, in priority order); requires --default-font
+        #[arg(long, value_parser = fonts::parse_family, requires = "default_font")]
+        fallback_font: Vec<String>,
         /// Debug only: skip draw.io XML validation
         #[arg(long)]
         no_validate: bool,
@@ -51,6 +65,11 @@ enum Command {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Licenses => {
+            io::stdout()
+                .lock()
+                .write_all(drawio_png_cli::BUNDLED_LICENSES.as_bytes())?;
+        }
         Command::Extract { input, output } => {
             let data = storage::read(&input)?;
             let xml = document::normalize(&png_data::extract(&data)?)?;
@@ -66,6 +85,10 @@ fn run(cli: Cli) -> Result<()> {
             base_image,
             no_render,
             no_validate,
+            renderer,
+            allow_network,
+            default_font,
+            fallback_font,
         } => {
             let bytes = if let Some(path) = input {
                 storage::read(&path)?
@@ -80,6 +103,11 @@ fn run(cli: Cli) -> Result<()> {
                 document::validate(xml)?;
                 document::normalize(xml)?
             };
+            let xml = if let Some(default) = default_font {
+                fonts::FontPolicy::new(&default, &fallback_font)?.apply(&xml)?
+            } else {
+                xml
+            };
             let base = if no_render {
                 eprintln!(
                     "warning: PNG pixels are not synchronized with the diagram (--no-render)"
@@ -90,7 +118,7 @@ fn run(cli: Cli) -> Result<()> {
                     png_data::transparent()?
                 }
             } else {
-                render::render(&xml)?
+                render::render_selected(&xml, renderer.unwrap_or_default(), allow_network)?
             };
             let png = png_data::embed(&base, &xml)?;
             storage::atomic_write(&output, &png)?;
