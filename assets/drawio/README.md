@@ -50,7 +50,8 @@ Full license texts in `licenses/` come from:
 
 `dip licenses` prints these notices and full texts, so standalone binary users
 can read them. Source and binary archives must also retain `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, this file and `licenses/`.
+`THIRD_PARTY_NOTICES.md`, this file, `licenses/`, and `../licenses/` (Chromium
+resampling and Cargo dependency licenses).
 
 ## Maintenance
 

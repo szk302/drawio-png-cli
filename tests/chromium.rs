@@ -87,7 +87,7 @@ fn invalid_browser_configuration_preserves_output() {
 }
 
 #[test]
-fn bundled_license_texts_are_available_without_a_renderer() {
+fn license_texts_are_available_without_a_renderer() {
     let result = dip()
         .arg("licenses")
         .assert()
@@ -96,12 +96,19 @@ fn bundled_license_texts_are_available_without_a_renderer() {
         .stdout
         .clone();
     let text = String::from_utf8(result).unwrap();
+    assert!(text.contains(include_str!("../LICENSE")));
     for notice in [
         "Apache License",
         "Felix Gnass",
         "Preet Shihn",
         "Mark Adler",
         "Cure53",
+        "Copyright 2011, 2012 The Chromium Authors",
+        "https://github.com/hediet/vscode-drawio",
+        "# Cargo dependency licenses",
+        "anyhow",
+        "Microsoft Corporation",
+        "Unicode",
     ] {
         assert!(text.contains(notice), "missing {notice}");
     }

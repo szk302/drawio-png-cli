@@ -205,10 +205,33 @@ Linux CIではChromium実機テストも実行します。資材ハッシュの�
 ## ライセンス
 
 本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。Chromiumを参考に移植した縮小処理はBSD-3-Clauseです。Cargoのライセンス表記は同梱描画資材と縮小処理を含めて `MIT AND Apache-2.0 AND Zlib AND BSD-3-Clause` としています。
-参考にした drawio-exporter の参照範囲・著作権表示・MIT ライセンス全文は
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) に記載しています。
-他の参照元と Cargo 依存ライブラリには、それぞれのライセンスが適用されます。
+これは異なるライセンスの構成物を含むパッケージの表記で、独自コードのMITライセンスを変更するものではありません。再配布する構成物ごとの条件に従ってください。
+参考にした drawio-exporter と VS Code Draw.io Integration の参照範囲・ライセンスは
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)、Cargo依存の著作権表示・ライセンス全文は
+[依存ライセンス一覧](assets/licenses/cargo-dependencies.txt) に記載しています。
+
+本プロジェクトは非公式の独立したプロジェクトであり、draw.ioの提供元であるJGraph Holdings Ltdおよびdraw.io AGとの提携・承認関係はありません。
 
 ソース配布には `LICENSE` と `THIRD_PARTY_NOTICES.md` を含めます。
-バイナリアーカイブを作成する際も、この2ファイルと `assets/drawio/README.md`・`assets/drawio/licenses/`・`assets/licenses/` を同梱してください。
-同梱描画資材は各資材のライセンスに従います。対象と除外範囲は [資材一覧](assets/drawio/README.md) に記録しています。`dip licenses` で同梱描画資材の表示・ライセンス全文を確認できます。
+ソース・バイナリとも、この2ファイルと `assets/drawio/README.md`・`assets/drawio/licenses/`・`assets/licenses/`（Cargo依存の生成済み一覧を含む）を保持してください。
+同梱描画資材は各資材のライセンスに従います。対象と除外範囲は [資材一覧](assets/drawio/README.md) に記録しています。`dip licenses` で本体・Cargo依存・同梱資材の通知とライセンス全文を確認できます。通常のビルドにライセンス生成ツールは不要です。
+
+依存を更新した際は、次の手順で一覧を再生成し、差分を確認して `Cargo.lock` とともにコミットしてください。
+一覧は本パッケージの全featuresで有効になる依存をOSを絞らず収集し、開発用・ビルド用の依存も含めています。`Cargo.lock` にあっても無効な任意依存や常に偽の `cfg` にある依存は対象外です。`about.toml` の優先順で許諾されたライセンスを選択し、`AND` の条件はすべて保持します。
+
+```sh
+mise exec -- cargo install --locked --version 0.9.2 cargo-about
+mise exec -- cargo install --locked --version 0.20.2 cargo-deny
+mise exec -- cargo fetch --locked
+mise exec -- python3 scripts/cargo_licenses.py
+mise exec -- cargo deny --locked check licenses
+```
+
+生成にはネットワーク接続が必要です。crateにライセンス原本がない場合は `about.toml` に固定した上流リビジョンとハッシュで補います。原本が見つからず汎用ライセンス文に置換された場合は生成を失敗させます。
+CIでは `scripts/cargo_licenses.py --check` で更新漏れを検出し、許可ライセンスを検査します。Linux・macOS・Windowsのビルド後に通知一式を同梱したバイナリアーカイブを作成します。手元での作成例:
+
+```sh
+mise exec -- cargo build --release --locked
+python3 scripts/package_binary.py target/release/dip target/dip.tar.gz
+# Windowsでは入力を target/release/dip.exe に変更
+```

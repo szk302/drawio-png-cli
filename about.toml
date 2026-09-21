@@ -1,0 +1,55 @@
+# Prefer MIT when upstream offers a choice. AND requirements remain mandatory.
+accepted = [
+    "MIT",
+    "BSD-3-Clause",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+# Keep a conservative inventory across all targets, including build and test tools.
+# Do not add a targets filter: the same notices are shipped on every platform.
+ignore-build-dependencies = false
+ignore-dev-dependencies = false
+
+# Limit the root package to explicit license sources. Crawling it would also
+# discover vendored notices and the generated inventory itself.
+[drawio-png-cli.clarify]
+license = "MIT AND Apache-2.0 AND Zlib AND BSD-3-Clause"
+files = [
+    { path = "LICENSE", license = "MIT", checksum = "8b2f2ae4a714df373191c9a9ba12361315039460b876ecb28130f60897fd278a" },
+    { path = "assets/drawio/licenses/drawio-Apache-2.0.txt", license = "Apache-2.0", checksum = "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1" },
+    { path = "assets/drawio/licenses/pako-zlib.txt", license = "Zlib", checksum = "20356aece8f36fda34645e97af3b163da0a88e253b78ffba298590d5b9121ebb" },
+    { path = "assets/licenses/chromium-BSD-3-Clause.txt", license = "BSD-3-Clause", checksum = "368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b" },
+]
+
+# cargo-about's automatic scan misses these lowercase license filenames.
+[windows-link.clarify]
+license = "MIT OR Apache-2.0"
+files = [
+    { path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" },
+]
+
+[windows-sys.clarify]
+license = "MIT OR Apache-2.0"
+files = [
+    { path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" },
+]
+
+# AUTHORS contains the license alternatives and the copyright holders. Retain
+# it in full while selecting MIT; do not substitute a generic MIT template.
+[r-efi.clarify]
+license = "MIT OR Apache-2.0 OR LGPL-2.1-or-later"
+files = [
+    { path = "AUTHORS", license = "MIT", checksum = "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111" },
+]
+
+# difflib 0.4.0 omits LICENSE and .cargo_vcs_info.json from its crate archive.
+# All packaged .rs files and Cargo.toml.orig match this upstream revision.
+[difflib.clarify]
+license = "MIT"
+override-git-commit = "f035fb8e656f27119e23eca9d5b996df14f3885e"
+git = [
+    { path = "LICENSE", license = "MIT", checksum = "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5" },
+]

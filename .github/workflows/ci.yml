@@ -8,7 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  licenses:
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Install license tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2,cargo-deny@0.20.2
+      - run: cargo fetch --locked
+      - run: cargo deny --locked check licenses
+      - name: Verify generated dependency notices
+        run: python scripts/cargo_licenses.py --check
+
   test:
+    needs: licenses
     strategy:
       fail-fast: false
       matrix:
@@ -32,3 +50,14 @@ jobs:
         run: |
           DIP_TEST_CHROME_PATH="$(command -v google-chrome)" cargo test --locked --test chromium -- --ignored --nocapture
       - run: cargo build --release --locked
+      - name: Package binary with license notices
+        shell: bash
+        run: |
+          binary=target/release/dip
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          python scripts/package_binary.py "$binary" "target/dip-$RUNNER_OS-$RUNNER_ARCH.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dip-${{ runner.os }}-${{ runner.arch }}
+          path: target/dip-*.tar.gz
+          if-no-files-found: error

@@ -9,8 +9,13 @@ pub mod storage;
 
 pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 
-/// Notices for the bundled renderer and Chromium-compatible resampling.
+/// Licenses and notices for dip, its Cargo dependencies, and bundled works.
 pub const BUNDLED_LICENSES: &str = concat!(
+    "--- dip original code (MIT) ---\n",
+    include_str!("../LICENSE"),
+    "\n\n--- Third-party notices ---\n",
+    include_str!("../THIRD_PARTY_NOTICES.md"),
+    "\n\n--- Bundled draw.io renderer ---\n",
     include_str!("../assets/drawio/README.md"),
     "\n\n--- Chromium resampling (Copyright 2011, 2012 The Chromium Authors) ---\n",
     include_str!("../assets/licenses/chromium-BSD-3-Clause.txt"),
@@ -34,4 +39,6 @@ pub const BUNDLED_LICENSES: &str = concat!(
     include_str!("../assets/drawio/licenses/roughjs-MIT.txt"),
     "\n\n--- spin-MIT.txt ---\n",
     include_str!("../assets/drawio/licenses/spin-MIT.txt"),
+    "\n\n--- Cargo dependencies ---\n",
+    include_str!("../assets/licenses/cargo-dependencies.txt"),
 );

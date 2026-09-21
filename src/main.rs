@@ -19,7 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Print bundled renderer notices and full license texts
+    /// Print licenses and notices for dip, dependencies, and bundled assets
     Licenses,
     /// Extract editable, uncompressed XML from a draw.io PNG
     Extract {
