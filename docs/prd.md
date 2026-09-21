@@ -172,7 +172,7 @@ draw.io Desktop 27.0.2 以降と Chromium / Chrome のヘッドレス描画に�
 * 同梱対象は基本図形・接続線・日本語・HTMLラベル・埋め込み画像。追加アイコン・ステンシル、数式・Mermaid・自動レイアウト資材は除外。必要資材が欠ける図面や未知の図形ではエラーにする。
 * 外部HTTP(S)画像・フォント等の取得は既定で禁止。Chromium専用の `--allow-network` で許可できる。`--renderer` / `--allow-network` と `--no-render` は引数エラー。
 * RustからCDPで専用プロファイルのChromiumを制御し、ループバックの資材サーバーを使用する。起動からPNG取得まで60秒。タイムアウト・失敗時もブラウザーとサーバーを片付け、既存出力を維持する。
-* ChromiumはDPR 2で描画し、取得PNGをHamming1方式で縦横それぞれ半分へ縮小する。Desktop 31.4.5 / Linuxの1倍表示環境の出力を基準とし、異なる環境での画素完全一致は保証しない。縮小前のRGBA画像も64 MiB以下とし、縮小・PNG再エンコードまで描画の60秒制限に含める。詳細は [描画互換性](rendering.md) に記載する。
+* Chromiumは `--chromium-mode raw|desktop|vscode` で出力方式を選ぶ。CLI指定 → `DIP_CHROMIUM_MODE` → `vscode`（SVG→Canvas、XMLのscale・border反映）の順に選ぶ。環境変数はChromium選択時だけ参照し、CLI指定があれば無視する。`raw` はDPR 1のキャプチャを画素加工せず使用し、`desktop` はDPR 2のキャプチャをHamming1で半分に縮小する。全モードで全ページXMLを埋め込む。モード指定はno-render・Desktop選択時には拒否する。取得画像・中間SVG／CanvasはRGBAで64 MiB以下に制限し、60秒の描画期限を維持する。詳細は [描画互換性](rendering.md) に記載する。
 * 資材のライセンス・出典・ハッシュを記録する。`dip licenses` で同梱資材の表示・全文を取得可能とする。
 * `embed --default-font FAMILY` と繰り返し指定可能な `--fallback-font FAMILY` により、両レンダラーへ渡すセルのフォント候補を統一できる。既存の明示指定を優先し、設定を全ページの埋め込みXMLにも保存する。省略時は従来の動作を保持し、特定の日本語フォントを強制しない。適用範囲と互換性は [フォント指定の仕様](fonts.md) に従う。
 

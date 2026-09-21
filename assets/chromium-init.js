@@ -1,5 +1,5 @@
 // Set local paths before upstream's viewer defaults can select public servers.
-window.urlParams = {offline: '1', local: '1'};
+window.urlParams = {offline: '1', local: '1', dark: '0'};
 window.PROXY_URL = null;
 window.EXPORT_URL = null;
 window.STYLE_PATH = 'styles';

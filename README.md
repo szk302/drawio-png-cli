@@ -44,14 +44,36 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 
 `embed --renderer auto|desktop|chromium` で選択します。既定の `auto` は Desktop を優先し、見つからない場合だけ Chromium に切り替えます。明示パスが不正な場合や描画に失敗した場合は切り替えず、既存出力を保持してエラー終了します。
 
-Chromiumの出力サイズはDesktopと同じく、描画範囲の右端・下端を切り上げて縦横に1pxを追加します。DPR 2で描画し、取得画像をHamming1方式で縦横それぞれ半分に縮小します。これはDesktop 31.4.5を1倍表示のLinux環境で実測した結果に合わせたものです。フォント・ブラウザーバージョン・Desktop側の表示倍率が異なる場合は、寸法や画素の完全一致を保証しません。詳細は [描画互換性](docs/rendering.md) を参照してください。
+Chromiumの出力方式は `--chromium-mode raw|desktop|vscode` または環境変数 `DIP_CHROMIUM_MODE` で選択します。優先順位はCLI指定 → 環境変数 → `vscode` です。
+
+| モード | 出力方式 |
+| --- | --- |
+| `raw` | draw.ioの描画結果をDPR 1でキャプチャし、画素の縮小・再加工をせず使用 |
+| `desktop` | Desktop互換。DPR 2でキャプチャし、Hamming1で半分へ縮小 |
+| `vscode` | VS Code拡張互換。SVG→CanvasでPNG化し、XMLの `scale`・`border` を反映 |
+
+全モードで先頭ページを描画し、全ページの編集用XMLをPNGに埋め込みます。`raw` もメタデータなしPNGを生成するモードではありません。`raw`・`desktop` は倍率1・余白0でdraw.ioのエクスポーターを呼び、XMLの `scale`・`border` は反映しません。
 
 ```sh
-dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
-dip embed --renderer desktop -i diagram.xml -o diagram.drawio.png
+dip embed --renderer chromium --chromium-mode raw -i diagram.xml -o raw.drawio.png
+dip embed --renderer chromium --chromium-mode desktop -i diagram.xml -o desktop.drawio.png
+dip embed --renderer chromium --chromium-mode vscode -i diagram.xml -o vscode.drawio.png
 ```
 
-`--renderer` と `--allow-network` は `--no-render` と併用できません。`--allow-network` は Chromium 専用です。`auto` で Desktop が選ばれる環境では `--renderer chromium` も指定してください。
+毎回同じモードを使う場合は、環境変数で指定できます。
+
+```sh
+export DIP_CHROMIUM_MODE=desktop
+dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
+# 今回だけVS Code互換で出力
+dip embed --renderer chromium --chromium-mode vscode -i diagram.xml -o diagram.drawio.png
+```
+
+環境変数の値は `raw`・`desktop`・`vscode` の完全一致で指定します。空文字・未知の値は描画前にエラーになります。CLIでモードを指定した場合は環境変数を読みません。Desktop選択時と `extract`・`validate`・`embed --no-render` でも読みません。環境変数はレンダラー選択を変更しないため、Chromiumを確実に使うには `--renderer chromium` を指定してください。
+
+`--renderer desktop` はDesktopアプリを起動します。`--renderer chromium --chromium-mode desktop` はChromiumだけでDesktop互換処理を行います。互換モードは参照環境の処理に合わせたもので、異なるフォント・ブラウザー・draw.io資材・拡張設定での完全一致は保証しません。詳細は [描画互換性](docs/rendering.md) を参照してください。
+
+`--renderer`・`--chromium-mode`・`--allow-network` は `--no-render` と併用できません。`--chromium-mode` と `--allow-network` はChromium専用です。`auto` でDesktopが選ばれる場合はエラーになるため、`--renderer chromium` も指定してください。
 
 ## フォントの統一
 
@@ -93,7 +115,7 @@ export DIP_DRAWIO_WEB_PATH=/path/to/drawio/src/main/webapp
 dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 ```
 
-`DIP_DRAWIO_WEB_PATH` を解除すると同梱資材に戻ります。指定が不正な場合はエラーとし、同梱資材には切り替えません。互換性を確認した上流コミットは `744cb5420fdf126efd7a09b1d7082ca3e12c0841` です。別バージョンでは `export3.html` / `render()` / `LoadingComplete` の互換性が必要です。
+`DIP_DRAWIO_WEB_PATH` を解除すると同梱資材に戻ります。指定が不正な場合はエラーとし、同梱資材には切り替えません。互換性を確認した上流コミットは `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd` です。別バージョンでは `export3.html` と、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` の互換性が必要です。
 
 図面が参照する外部画像・Webフォントの取得は既定で禁止し、必要な外部資材がある場合はエラーにします。明示的に許可するときは次を使います。
 
@@ -101,7 +123,7 @@ dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 dip embed --renderer chromium --allow-network -i diagram.xml -o diagram.drawio.png
 ```
 
-`--allow-network` は外部HTTP(S)画像・フォント等の資材取得を許可します。外部スクリプト、フレーム、任意のローカルファイルの読み込みは許可しません。Web資材はループバック限定の一時HTTPサーバーで提供し、処理後にサーバーと専用ブラウザープロファイルを片付けます。
+`--allow-network` は外部HTTP(S)画像・フォント等の資材取得を許可します。`vscode` モードでは、外部画像・フォントのCanvasへの埋め込みに配信元のCORS許可も必要です。外部スクリプト、フレーム、任意のローカルファイルの読み込みは許可しません。Web資材はループバック限定の一時HTTPサーバーで提供し、処理後にサーバーと専用ブラウザープロファイルを片付けます。
 
 追加オプションは `DIP_CHROME_ARGS` にPOSIX形式で指定します。
 
@@ -167,7 +189,7 @@ exec xvfb-run -a /opt/drawio/drawio "$@"
 - `tEXt`／`zTXt` の `mxfile`／`mxGraphModel` を読み取り、旧 Desktop の raw DEFLATE、URL エンコードの二重化にも対応します。競合する複数の図面メタデータは拒否します。
 - 抽出時は全ページを非圧縮 XML にします。ページ順・名前・属性・未知要素を保持しますが、元の XML 文字列との完全一致は保証しません。
 - 保存時は既存の図面メタデータを置換し、URL エンコードした XML を一つの `tEXt` チャンクへ格納します。ベース画像の画像データ・無関係なチャンクは保持します。
-- 入力、展開データ、出力 PNG、デコード後の画像バッファに 64 MiB の上限があります。Chromiumでは縮小前の2倍画像にもこの制限を適用するため、最終画像は最大4,194,304画素です。DTD と外部エンティティは受け付けません。
+- 入力、展開データ、出力 PNG、デコード後の画像バッファに 64 MiB の上限があります。Chromiumでは取得画像にもこの制限を適用します。`raw` は最大16,777,216画素、`desktop` は2倍取得のため最終画像が最大4,194,304画素です。`vscode` は中間SVG画像と最終Canvasがそれぞれ最大16,777,216画素・一辺16,384pxです。超過時は自動調整せずエラーにします。DTD と外部エンティティは受け付けません。
 - 出力先と同じディレクトリの一時ファイルに保存・同期後、アトミックに置換します。既存ファイルの権限を引き継ぎ、失敗時の一時ファイルは片付けます。出力先ディレクトリは事前に作成してください。
 - `--no-validate` はデバッグ用です。XML の構造検証・正規化を省略し、不正な XML も埋め込めます。UTF-8・サイズ制限・PNG 検査・アトミック保存は維持します。
 
@@ -204,7 +226,7 @@ Linux CIではChromium実機テストも実行します。資材ハッシュの�
 
 ## ライセンス
 
-本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。Chromiumを参考に移植した縮小処理はBSD-3-Clauseです。Cargoのライセンス表記は同梱描画資材と縮小処理を含めて `MIT AND Apache-2.0 AND Zlib AND BSD-3-Clause` としています。
+本プロジェクトの独自コードは [MIT License](LICENSE) で公開します。Desktop互換の縮小処理はBSD-3-Clauseです。Cargoのライセンス表記は同梱描画資材と縮小処理を含めて `MIT AND Apache-2.0 AND Zlib AND BSD-3-Clause` としています。
 これは異なるライセンスの構成物を含むパッケージの表記で、独自コードのMITライセンスを変更するものではありません。再配布する構成物ごとの条件に従ってください。
 参考にした drawio-exporter と VS Code Draw.io Integration の参照範囲・ライセンスは
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)、Cargo依存の著作権表示・ライセンス全文は

@@ -13,6 +13,7 @@ fn dip() -> assert_cmd::Command {
         "DIP_CHROME_PATH",
         "CHROME_PATH",
         "DIP_CHROME_ARGS",
+        "DIP_CHROMIUM_MODE",
         "DIP_DRAWIO_WEB_PATH",
     ] {
         command.env_remove(name);
@@ -26,6 +27,7 @@ fn rendering_flags_conflict_with_no_render() {
         vec!["--renderer", "chromium"],
         vec!["--renderer", "auto"],
         vec!["--allow-network"],
+        vec!["--chromium-mode", "raw"],
     ] {
         dip()
             .args(["embed", "--no-render", "-o", "unused.png"])
@@ -48,6 +50,7 @@ fn no_render_and_xml_commands_ignore_browser_environment() {
         .env("DIP_CHROME_ARGS", "'unfinished")
         .env("DIP_CHROME_PATH", "missing")
         .env("DIP_DRAWIO_WEB_PATH", "missing")
+        .env("DIP_CHROMIUM_MODE", "invalid")
         .args(["embed", "--no-render", "-o"])
         .arg(&output)
         .write_stdin(MODEL)
@@ -57,6 +60,7 @@ fn no_render_and_xml_commands_ignore_browser_environment() {
         dip()
             .env("DIP_CHROME_ARGS", "'unfinished")
             .env("DIP_DRAWIO_WEB_PATH", "missing")
+            .env("DIP_CHROMIUM_MODE", "invalid")
             .arg(command)
             .arg(&output)
             .assert()
@@ -70,6 +74,10 @@ fn invalid_browser_configuration_preserves_output() {
     let output = dir.path().join("output.png");
     fs::write(&output, b"original").unwrap();
     for (name, value) in [
+        ("DIP_CHROMIUM_MODE", "unknown"),
+        ("DIP_CHROMIUM_MODE", ""),
+        ("DIP_CHROMIUM_MODE", "RAW"),
+        ("DIP_CHROMIUM_MODE", " raw "),
         ("DIP_CHROME_PATH", "missing"),
         ("CHROME_PATH", "missing"),
         ("DIP_CHROME_ARGS", "'unfinished"),
@@ -112,6 +120,39 @@ fn license_texts_are_available_without_a_renderer() {
     ] {
         assert!(text.contains(notice), "missing {notice}");
     }
+}
+
+#[test]
+fn chromium_modes_reject_invalid_combinations_and_preserve_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.png");
+    fs::write(&output, b"original").unwrap();
+    dip()
+        .args(["embed", "--chromium-mode", "unknown", "-o"])
+        .arg(&output)
+        .write_stdin(MODEL)
+        .assert()
+        .code(2);
+    for mode in ["raw", "desktop", "vscode"] {
+        let result = dip()
+            .args([
+                "embed",
+                "--renderer",
+                "desktop",
+                "--chromium-mode",
+                mode,
+                "-o",
+            ])
+            .arg(&output)
+            .write_stdin(MODEL)
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        assert!(String::from_utf8_lossy(&result).contains("--chromium-mode requires"));
+    }
+    assert_eq!(fs::read(output).unwrap(), b"original");
 }
 
 fn pixels(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
@@ -158,14 +199,112 @@ fn real_chromium_renders_first_page_and_preserves_xml() {
     assert!(actual.0 > 1 && actual.1 > 1);
     assert_eq!(actual, pixels(&render(MODEL, None, false).unwrap()));
 
-    // Desktop 31.4.5 exports this font-independent rectangle at 104x44.
+    // VS Code draw.io xmlpng exports this font-independent rectangle at 102x42.
     let geometry = r##"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" vertex="1" parent="1" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></root></mxGraphModel>"##;
     let actual = pixels(&render(geometry, None, false).unwrap());
-    assert_eq!((actual.0, actual.1), (104, 44));
+    assert_eq!((actual.0, actual.1), (102, 42));
     assert_eq!(
         actual,
-        pixels(include_bytes!("fixtures/geometry-desktop.png"))
+        pixels(include_bytes!("fixtures/geometry-vscode.png"))
     );
+    let options =
+        format!("<mxfile scale=\"2\" border=\"10\"><diagram>{geometry}</diagram></mxfile>");
+    assert_eq!(
+        pixels(&render(&options, None, false).unwrap()),
+        pixels(include_bytes!("fixtures/geometry-options-vscode.png"))
+    );
+    // Defaults and absent file attributes must behave like xmlpng.
+    let defaults = format!("<mxfile><diagram>{geometry}</diagram></mxfile>");
+    assert_eq!(pixels(&render(&defaults, None, false).unwrap()), actual);
+    // The SVG pipeline preserves transparency; explicit backgrounds are filled.
+    assert!(actual.2.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
+    let white = geometry.replace("<mxGraphModel>", "<mxGraphModel background=\"#ffffff\">");
+    let white = pixels(&render(&white, None, false).unwrap());
+    assert!(white.2.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_modes_select_distinct_outputs_and_preserve_xml() {
+    use chromium::ChromiumMode;
+    let (program, args) = browser();
+    let dir = tempfile::tempdir().unwrap();
+    let geometry = r##"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" vertex="1" parent="1" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></root></mxGraphModel>"##;
+    for (mode, size, reference) in [
+        ("raw", (103, 43), None),
+        (
+            "desktop",
+            (104, 44),
+            Some(&include_bytes!("fixtures/geometry-desktop.png")[..]),
+        ),
+        (
+            "vscode",
+            (102, 42),
+            Some(&include_bytes!("fixtures/geometry-vscode.png")[..]),
+        ),
+    ] {
+        for from_env in [false, true] {
+            let output = dir.path().join(format!("{mode}-{from_env}.png"));
+            let mut command = dip();
+            command
+                .env("DIP_CHROME_PATH", &program)
+                .env("DIP_CHROME_ARGS", shell_words::join(&args))
+                .env("DIP_DRAWIO_PATH", "invalid-but-ignored")
+                .env(
+                    "DIP_CHROMIUM_MODE",
+                    if from_env {
+                        mode
+                    } else {
+                        "invalid-but-overridden"
+                    },
+                )
+                .args(["embed", "--renderer", "chromium", "-o"])
+                .arg(&output);
+            if !from_env {
+                command.args(["--chromium-mode", mode]);
+            }
+            command.write_stdin(geometry).assert().success();
+            let png = fs::read(output).unwrap();
+            assert_eq!(
+                png_data::extract(&png).unwrap(),
+                document::normalize(geometry).unwrap()
+            );
+            let actual = pixels(&png);
+            assert_eq!((actual.0, actual.1), size);
+            if let Some(reference) = reference {
+                assert_eq!(actual, pixels(reference));
+            }
+        }
+    }
+
+    for mode in [ChromiumMode::Raw, ChromiumMode::Desktop] {
+        let draw = |xml: &str| {
+            chromium::render_with_mode(
+                &program,
+                xml,
+                Duration::from_secs(20),
+                &args,
+                None,
+                false,
+                mode,
+            )
+        };
+        assert_eq!(
+            pixels(&draw(&document::normalize(MIXED).unwrap()).unwrap()),
+            pixels(&draw(MODEL).unwrap())
+        );
+        // A 2x capture exceeds the limit even though the final pixels fit.
+        let large = geometry
+            .replace("width=\"100\"", "width=\"3000\"")
+            .replace("height=\"40\"", "height=\"1500\"");
+        if mode == ChromiumMode::Desktop {
+            assert!(format!("{:#}", draw(&large).unwrap_err()).contains("2x Chromium capture"));
+        }
+        let huge = geometry
+            .replace("width=\"100\"", "width=\"5000\"")
+            .replace("height=\"40\"", "height=\"4000\"");
+        assert!(draw(&huge).is_err());
+    }
 }
 
 #[test]
@@ -226,14 +365,31 @@ fn real_chromium_local_assets_and_unsupported_content() {
     assert!(format!("{:#}", render(&math, None, false).unwrap_err()).contains("Math"));
     let huge = MODEL.replace("width=\"100\"", "width=\"20000000\"");
     assert!(render(&huge, None, false).is_err());
-    // The final 3004x1504 PNG fits in 64 MiB, but its 2x capture does not.
-    let capture_too_large = MODEL
-        .replace("width=\"100\"", "width=\"3000\"")
-        .replace("height=\"40\"", "height=\"1500\"");
+    let large_area = MODEL
+        .replace("width=\"100\"", "width=\"5000\"")
+        .replace("height=\"40\"", "height=\"4000\"");
     assert!(
-        format!("{:#}", render(&capture_too_large, None, false).unwrap_err())
-            .contains("2x Chromium capture")
+        format!("{:#}", render(&large_area, None, false).unwrap_err())
+            .contains("Canvas image exceeds")
     );
+    // Validate the requested scale before allocating the Canvas.
+    let oversized = format!("<mxfile scale=\"1000000\"><diagram>{MODEL}</diagram></mxfile>");
+    assert!(
+        format!("{:#}", render(&oversized, None, false).unwrap_err())
+            .contains("Canvas image exceeds")
+    );
+    for attributes in [
+        "scale=\"0\"",
+        "scale=\"-1\"",
+        "scale=\"Infinity\"",
+        "border=\"-1\"",
+    ] {
+        let invalid = format!("<mxfile {attributes}><diagram>{MODEL}</diagram></mxfile>");
+        assert!(
+            format!("{:#}", render(&invalid, None, false).unwrap_err())
+                .contains("Invalid PNG scale or border")
+        );
+    }
     let broken_image = MODEL.replace(
         "vertex=\"1\"",
         "vertex=\"1\" style=\"shape=image;image=data:image/png,aW52YWxpZA==;\"",
@@ -289,14 +445,22 @@ fn real_chromium_html_embedded_images_and_network_policy() {
     let stop = Arc::new(AtomicBool::new(false));
     let counter = requests.clone();
     let signal = stop.clone();
+    let cors = Arc::new(AtomicBool::new(true));
+    let server_cors = cors.clone();
     let data = png.clone();
     let worker = std::thread::spawn(move || {
         while !signal.load(Ordering::Relaxed) {
             if let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(50)) {
                 counter.fetch_add(1, Ordering::Relaxed);
-                let _ = request.respond(tiny_http::Response::from_data(data.clone()).with_header(
+                let mut response = tiny_http::Response::from_data(data.clone()).with_header(
                     tiny_http::Header::from_bytes("Content-Type", "image/png").unwrap(),
-                ));
+                );
+                if server_cors.load(Ordering::Relaxed) {
+                    response.add_header(
+                        tiny_http::Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
+                    );
+                }
+                let _ = request.respond(response);
             }
         }
     });
@@ -311,11 +475,14 @@ fn real_chromium_html_embedded_images_and_network_policy() {
     let blocked_count = requests.load(Ordering::Relaxed);
     let allowed = render(&external, None, true);
     let allowed_count = requests.load(Ordering::Relaxed);
+    cors.store(false, Ordering::Relaxed);
+    let no_cors = render(&external, None, true);
     stop.store(true, Ordering::Relaxed);
     worker.join().unwrap();
     assert!(blocked.is_err());
     assert_eq!(blocked_count, 0);
     assert!(allowed_count > 0);
+    assert!(no_cors.is_err());
     let embedded = image_model(&format!(
         "data:image/png,{}",
         base64::engine::general_purpose::STANDARD.encode(&png)
@@ -362,8 +529,9 @@ mod unix {
         let desktop = script(dir.path(), "desktop", "echo desktop-selected >&2; exit 4");
         let result = dip()
             .env("DIP_CHROME_PATH", &path)
-            .env("DIP_DRAWIO_PATH", desktop)
+            .env("DIP_DRAWIO_PATH", &desktop)
             .env("DIP_CHROME_ARGS", "'unfinished")
+            .env("DIP_CHROMIUM_MODE", "invalid")
             .args(["embed", "-o"])
             .arg(&output)
             .write_stdin(MODEL)
@@ -374,6 +542,21 @@ mod unix {
             .clone();
         assert!(String::from_utf8_lossy(&result).contains("desktop-selected"));
         assert!(!String::from_utf8_lossy(&result).contains("browser-selected"));
+        let result = dip()
+            .env("DIP_DRAWIO_PATH", &desktop)
+            .env("DIP_CHROME_PATH", &path)
+            .args(["embed", "--chromium-mode", "raw", "-o"])
+            .arg(&output)
+            .write_stdin(MODEL)
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        let error = String::from_utf8_lossy(&result);
+        assert!(error.contains("Desktop was selected"));
+        assert!(!error.contains("desktop-selected"));
+        assert!(!error.contains("browser-selected"));
         assert_eq!(fs::read(&output).unwrap(), b"original");
     }
 

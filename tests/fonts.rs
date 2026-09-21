@@ -242,6 +242,7 @@ fn real_renderers_use_the_default_and_explicit_fallback() {
                     std::env::var("DIP_TEST_CHROME_ARGS").unwrap_or_default(),
                 )
                 .env_remove("DIP_DRAWIO_WEB_PATH")
+                .env_remove("DIP_CHROMIUM_MODE")
                 .args(["embed", "--renderer", renderer, "-o"])
                 .arg(&output)
                 .args(options)

@@ -1,14 +1,19 @@
 # Bundled draw.io renderer
 
 Upstream: https://github.com/jgraph/drawio
-Revision: `744cb5420fdf126efd7a09b1d7082ca3e12c0841`.
+Revision: `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`.
 
 `manifest.json` identifies the four unmodified upstream assets and SHA-256
 hashes of their decompressed bytes. They are stored with deterministic gzip
 headers and embedded into `dip`. `chromium.html`, `chromium-init.js`, and
 `chromium-render.js` in the parent directory are original MIT-licensed dip
 integration code; they configure local URLs, disable optional bundled math,
-check unsupported shapes, and invoke the exporter. No upstream source is edited.
+check unsupported shapes, and select `Editor.exportToCanvas()` for the `vscode`
+mode or `render()` for the `raw` and `desktop` capture modes.
+The revision matches the draw.io submodule pinned by the inspected
+[`hediet.vscode-drawio`](https://github.com/hediet/vscode-drawio) extension
+(`79500e6d467a95906a5f03680627c8f26ad3a0af`). Its reference-only use is documented
+in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). No upstream source is edited.
 
 ## Included works
 

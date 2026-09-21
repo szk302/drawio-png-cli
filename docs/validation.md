@@ -143,3 +143,51 @@ DIP_TEST_DRAWIO_PATH=/absolute/path/to/drawio-wrapper \
 2026-09-20、ローカルの拡張コードと固定されたdraw.ioサブモジュールを使い、拡張のWebview HTMLと `xmlpng` 保存経路をChromiumで再現した。9入力すべてでDesktop／CLI Chromiumと出力寸法が異なり、文字なし矩形も拡張102×42、CLI104×44となった。単純な余白除去後も画素差が残った。拡張経路のDPR 1／2間では全9件のRGBAが一致した。
 
 CLI生成PNGを拡張経路で再読み込み・再保存する18件も成功し、XMLを直接読み込んだ拡張出力とのRGBA一致、再保存PNGからのXML抽出・検証、複数ページの保持を確認した。VS Code本体での実機検証は含まない。詳細と再現条件は [VS Code拡張とのPNG互換性](vscode-rendering.md) を参照。CLIの描画実装はこの調査では変更していない。
+
+## VS Code互換のSVG→Canvas方式への変更
+
+2026-09-20、Chromiumレンダラーをdraw.ioの `Editor.exportToCanvas()` に変更した。同梱Web資材も、調査した拡張のサブモジュールと同じ `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd` に合わせた。Desktopの描画方式・autoのDesktop優先は維持する。
+
+同じ9入力を再出力し、拡張HTMLで独立生成したPNGと比較した。全9件で寸法・RGBAが一致し、各PNGの `dip validate` も成功した。
+
+| 図面 | フォント | 拡張／新Chromiumの寸法 | RGBAが異なる画素数 |
+| --- | --- | --- | --- |
+| 文字なし矩形 | 指定なし／共通 | 102×42 | 0 |
+| HTMLラベル | 指定なし／共通 | 242×82 | 0 |
+| 日本語・英数字ラベル | 指定なし | 146×42 | 0 |
+| 日本語・英数字ラベル | 共通 | 129×42 | 0 |
+| 複数ページ | 指定なし | 146×42 | 0 |
+| 複数ページ | 共通 | 129×42 | 0 |
+| 文字なし矩形、scale=2・border=10 | 指定なし | 244×124 | 0 |
+
+共通フォントはNoto Sans CJK JP。比較環境はChromium 153.0.8010.47 / Linux ARM64。VS Code本体の実機、別OS、拡張のカスタム設定は未検証。比較画像と結果は `.tmp/vscode-comparison/*-canvas.png`・`canvas-results.json` に保存した。
+
+- 拡張で独立生成した矩形と倍率・余白付き矩形を固定fixtureにし、画素比較をChromium実機テストへ追加した。
+- 複数ページのセルID重複が先頭ページへ干渉しないこと、全ページXMLの保持、透明背景・明示背景色を検証した。
+- 容量超過（大きな辺・面積・倍率）と不正倍率・余白、画像のデコード失敗、タイムアウトを検証した。
+- 外部画像は既定で接続せず、ネットワーク許可＋CORS許可時に埋め込み画像と同じ画素となる。配信元のCORS許可がない場合はエラーにする。
+- 旧Rust縮小処理・旧fixtureとChromium由来のBSD-3-Clause表記を削除した。現在の描画処理にChromiumから移植したコードは含まない。
+
+現在の仕様とサイズ制限は [描画互換性](rendering.md) を参照。
+
+通常テスト48件、Chromium実機4件、Desktop・Chromiumを使う共通フォント実機1件が成功した。format・clippy・releaseビルド・同梱資材のハッシュ検証も成功した。
+
+## Chromiumの出力モード選択
+
+2026-09-20、`--chromium-mode raw|desktop|vscode` を追加した。既定は現在のvscode方式を維持する。rawはDPR 1のキャプチャを画像加工せず使用し、desktopは以前のDPR 2＋Hamming1方式を復元する。全モードで編集用XMLを埋め込む。Desktop互換処理の復元に合わせて、縮小処理のBSDライセンス表示と旧fixtureも復元した。
+
+- Chromium実機テストで、同じ矩形がraw 103×43、desktop 104×44、vscode 102×42になることを確認した。
+- desktop・vscodeのPNGはそれぞれ独立生成した基準画像とRGBAが一致した。
+- CLI経由のモード選択、全モードのXML保持、raw・desktopの先頭ページ選択と取得サイズ制限を確認した。
+- 不明なモード、no-renderとの併用、Desktopレンダラーとの併用を拒否し、既存出力が保持されることを確認した。
+- Chromium実機5件が成功。vscodeの既存の画像・CORS・透明背景・倍率／余白・タイムアウトの検証も維持した。
+
+Desktop互換は参照したDesktop環境の処理に合わせたモードであり、別OS・フォント・ブラウザーバージョンでの完全一致を保証しない。仕様は [描画互換性](rendering.md) を参照。
+
+通常テスト52件、format・clippy・releaseビルド・資材ハッシュ検証が成功した。autoでDesktopが選ばれる場合のモード指定も、両エンジンを起動する前に拒否することをテストした。
+
+## Chromiumモードの環境変数指定
+
+2026-09-20、`DIP_CHROMIUM_MODE` を追加した。CLIの `--chromium-mode` → 環境変数 → vscodeの順で選ぶ。CLI指定時、Desktop選択時、抽出・検証・no-renderでは環境変数を読まない。
+
+Chromium関連の通常テスト8件とモード選択の実機テスト1件が成功した。環境変数で3モードを選び、CLI指定時と同じ寸法・各互換基準画像になること、不正な環境変数でも明示CLI指定を優先することを確認した。空文字・未知値・大文字・余分な空白はエラーになり、既存出力を保持する。format・clippy・releaseビルドも成功した。

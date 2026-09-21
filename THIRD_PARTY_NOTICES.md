@@ -12,7 +12,7 @@ license requirements. `dip licenses` prints this file and the license texts.
 
 ## Chromium-compatible image resizing
 
-`src/resample.rs` adapts the Hamming1 filter generation and fixed-point channel
+The Chromium `desktop` output mode uses `src/resample.rs`, which adapts the Hamming1 filter generation and fixed-point channel
 rounding used by Chromium's `skia/ext/image_operations.cc` (Copyright 2012 The
 Chromium Authors) and `skia/ext/convolver.{cc,h}` (Copyright 2011 The Chromium
 Authors), reviewed at Chromium `152.0.7977.76`. The Rust implementation is limited
@@ -116,7 +116,7 @@ see [the fixture provenance](tests/fixtures/README.md).
 ## Bundled Chromium renderer assets
 
 The Chromium renderer embeds an unmodified, gzip-compressed subset of draw.io
-at revision `744cb5420fdf126efd7a09b1d7082ca3e12c0841`. This differs from the
+at revision `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`. This differs from the
 reference-only use of the Desktop checkout described above.
 
 See [the asset inventory](assets/drawio/README.md),
@@ -132,6 +132,9 @@ Source and binary archives must retain this file, `LICENSE`,
 (including the generated Cargo dependency notices). No runtime or build-time
 asset download is performed.
 
-The headless export integration also consulted jgraph/draw-image-export2's
-`export.js` for its `render` / `LoadingComplete` protocol and screenshot sizing.
-No server source or Node.js dependencies from that project are bundled.
+The headless export integration calls draw.io's `Editor.exportToCanvas()` in
+`vscode` mode, matching the extension's `xmlpng` save path. The `raw` and
+`desktop` modes use draw.io's `render` / `LoadingComplete` capture protocol.
+The VS Code extension reference is described above. Chromium and Electron runtimes
+are not bundled. The Desktop-compatible resizing
+code described above is included in dip.

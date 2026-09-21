@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-REVISION = '744cb5420fdf126efd7a09b1d7082ca3e12c0841'
+REVISION = 'f3abfe0f082c18f7b4fee8a34c2d07b1987687fd'
 FILES = ['js/viewer.min.js', 'js/export-init.js', 'js/export.js', 'mxgraph/css/common.css']
 out = Path(__file__).resolve().parents[1] / 'assets/drawio'
 if len(sys.argv) != 2:
@@ -22,7 +22,7 @@ if sys.argv[1] == '--check':
     print('Bundled draw.io asset hashes verified')
     sys.exit(0)
 root = Path(sys.argv[1])
-assert subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip() == REVISION
+subprocess.check_call(['git', '-C', str(root), 'cat-file', '-e', REVISION + '^{commit}'])
 entries = []
 for name in FILES:
     # Read the pinned Git object, never uncommitted checkout contents.

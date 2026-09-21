@@ -1,4 +1,6 @@
-# VS Code draw.io拡張とのPNG互換性
+# VS Code draw.io拡張とのPNG互換性（変更前の調査）
+
+以下はSVG→Canvasへの変更前（コミット `24dd930`）の記録。現在の方式は [rendering.md](rendering.md) を参照。
 
 2026-09-20に確認した範囲では、VS Code拡張のPNG保存結果と、`dip`のDesktop／Chromium出力は一致しない。文字なし矩形でも寸法と画素が異なる。前回のDesktop互換調整は、VS Code拡張との一致を意味しない。
 

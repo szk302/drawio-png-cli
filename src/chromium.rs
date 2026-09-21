@@ -2,6 +2,7 @@
 use crate::{
     MAX_BYTES,
     chromium_assets::AssetServer,
+    png_data,
     render::{ChildGuard, TIMEOUT, executable, log_excerpt},
     resample,
 };
@@ -125,16 +126,63 @@ fn extra_args() -> Result<Vec<String>> {
     Ok(args)
 }
 
+/// Output policy within the Chromium backend; this never launches Desktop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum ChromiumMode {
+    /// Native 1x screenshot, without pixel resampling
+    Raw,
+    /// 2x capture and Hamming1 downsampling matching the Desktop reference
+    Desktop,
+    /// SVG-to-Canvas export matching the VS Code extension
+    #[default]
+    Vscode,
+}
+
+impl ChromiumMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::Desktop => "desktop",
+            Self::Vscode => "vscode",
+        }
+    }
+}
+
 pub fn render(xml: &str, allow_network: bool) -> Result<Vec<u8>> {
+    render_configured(xml, allow_network, None)
+}
+
+pub(crate) fn render_configured(
+    xml: &str,
+    allow_network: bool,
+    explicit_mode: Option<ChromiumMode>,
+) -> Result<Vec<u8>> {
+    let mode = if let Some(mode) = explicit_mode {
+        mode
+    } else if let Some(value) = env::var_os("DIP_CHROMIUM_MODE") {
+        let value = value
+            .to_str()
+            .context("DIP_CHROMIUM_MODE must be valid Unicode")?;
+        <ChromiumMode as clap::ValueEnum>::from_str(value, false).map_err(|_| {
+            anyhow::anyhow!("invalid DIP_CHROMIUM_MODE: expected raw, desktop, or vscode")
+        })?
+    } else {
+        ChromiumMode::default()
+    };
+    render_mode(xml, allow_network, mode)
+}
+
+pub fn render_mode(xml: &str, allow_network: bool, mode: ChromiumMode) -> Result<Vec<u8>> {
     let args = extra_args()?;
     let program = discover()?;
-    render_with(
+    render_with_mode(
         &program,
         xml,
         TIMEOUT,
         &args,
         env::var_os("DIP_DRAWIO_WEB_PATH").map(PathBuf::from),
         allow_network,
+        mode,
     )
 }
 
@@ -146,6 +194,26 @@ pub fn render_with(
     args: &[String],
     web_root: Option<PathBuf>,
     allow_network: bool,
+) -> Result<Vec<u8>> {
+    render_with_mode(
+        program,
+        xml,
+        timeout,
+        args,
+        web_root,
+        allow_network,
+        ChromiumMode::default(),
+    )
+}
+
+pub fn render_with_mode(
+    program: &Path,
+    xml: &str,
+    timeout: Duration,
+    args: &[String],
+    web_root: Option<PathBuf>,
+    allow_network: bool,
+    mode: ChromiumMode,
 ) -> Result<Vec<u8>> {
     ensure!(xml.len() <= MAX_BYTES, "XML exceeds 64 MiB limit");
     let deadline = Instant::now() + timeout;
@@ -255,7 +323,7 @@ pub fn render_with(
         )?;
         cdp.call(
             "Emulation.setDeviceMetricsOverride",
-            json!({"width":800,"height":600,"deviceScaleFactor":resample::SCALE,"mobile":false}),
+            json!({"width":800,"height":600,"deviceScaleFactor":if mode == ChromiumMode::Desktop {resample::SCALE} else {1},"mobile":false}),
         )?;
         let navigation = cdp.call(
             "Page.navigate",
@@ -267,7 +335,11 @@ pub fn render_with(
         );
         loop {
             if cdp
-                .eval("document.readyState === 'complete' && typeof render === 'function'")?
+                .eval(if mode == ChromiumMode::Vscode {
+                    "document.readyState === 'complete' && typeof Editor === 'function' && typeof Editor.prototype.exportToCanvas === 'function'"
+                } else {
+                    "document.readyState === 'complete' && typeof render === 'function'"
+                })?
                 .as_bool()
                 == Some(true)
             {
@@ -278,33 +350,19 @@ pub fn render_with(
         let window = cdp.call("Runtime.evaluate", json!({"expression":"window"}))?;
         let rendered = cdp.call("Runtime.callFunctionOn", json!({
             "objectId":window["result"]["objectId"],
-            "functionDeclaration":format!("function(xml, bundled) {{ {} return dipRender(xml, bundled); }}", include_str!("../assets/chromium-render.js")),
-            "arguments":[{"value":xml},{"value":server.bundled}],
-            "returnByValue":true
+            "functionDeclaration":format!("function(xml, bundled, mode) {{ {} return dipRender(xml, bundled, mode); }}", include_str!("../assets/chromium-render.js")),
+            "arguments":[{"value":xml},{"value":server.bundled},{"value":mode.name()}],
+            "returnByValue":true, "awaitPromise":true
         }))?;
         ensure!(
             rendered.get("exceptionDetails").is_none(),
             "draw.io JavaScript error: {}",
             rendered["exceptionDetails"]
         );
-        let bounds = loop {
-            let result = cdp.eval("document.getElementById('LoadingComplete') ? JSON.parse(document.getElementById('LoadingComplete').getAttribute('bounds')) : null")?;
-            if !result.is_null() {
-                break result;
-            }
-            thread::sleep(Duration::from_millis(20));
-        };
-        let width = dimension(&bounds, "width", "x")?;
-        let height = dimension(&bounds, "height", "y")?;
-        resample::capture_size(width, height)?;
-        cdp.call(
-            "Emulation.setDeviceMetricsOverride",
-            json!({"width":width,"height":height,"deviceScaleFactor":resample::SCALE,"mobile":false}),
-        )?;
-        cdp.call("Runtime.evaluate", json!({"expression":"document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))", "awaitPromise":true}))?;
-        cdp.eval("true")?;
-        let screenshot = cdp.call("Page.captureScreenshot", json!({"format":"png","captureBeyondViewport":true,"clip":{"x":0,"y":0,"width":width,"height":height,"scale":1}}))?;
-        let data = screenshot["data"]
+        if mode != ChromiumMode::Vscode {
+            return capture(&mut cdp, mode, deadline);
+        }
+        let data = rendered["result"]["value"]
             .as_str()
             .context("Chromium returned no PNG")?;
         ensure!(
@@ -314,9 +372,78 @@ pub fn render_with(
         let png = STANDARD
             .decode(data)
             .context("invalid Chromium PNG encoding")?;
-        resample::half_png(&png, width, height, deadline).context("cannot resize Chromium PNG")
+        cdp.eval("true")?;
+        png_data::validate(&png).context("Chromium produced an invalid PNG")?;
+        remaining(deadline)?;
+        Ok(png)
     })();
     result.with_context(|| format!("Chromium rendering failed: {}", log_excerpt(&mut log)))
+}
+
+fn capture(cdp: &mut Cdp, mode: ChromiumMode, deadline: Instant) -> Result<Vec<u8>> {
+    let bounds = loop {
+        let result = cdp.eval("document.getElementById('LoadingComplete') ? JSON.parse(document.getElementById('LoadingComplete').getAttribute('bounds')) : null")?;
+        if !result.is_null() {
+            break result;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let dimension = |size: &str, offset: &str| -> Result<u32> {
+        let value = (bounds[size].as_f64().context("invalid render bounds")?
+            + bounds[offset].as_f64().context("invalid render bounds")?)
+        .ceil()
+            + if mode == ChromiumMode::Desktop {
+                1.0
+            } else {
+                0.0
+            };
+        ensure!(
+            value.is_finite() && value >= 1.0 && value <= (MAX_BYTES / 4) as f64,
+            "invalid or oversized render bounds"
+        );
+        Ok(value as u32)
+    };
+    let width = dimension("width", "x")?;
+    let height = dimension("height", "y")?;
+    let dpr = if mode == ChromiumMode::Desktop {
+        resample::capture_size(width, height)?;
+        resample::SCALE
+    } else {
+        ensure!(
+            u64::from(width) * u64::from(height) * 4 <= MAX_BYTES as u64,
+            "raw capture exceeds 64 MiB limit"
+        );
+        1
+    };
+    cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        json!({"width":width,"height":height,"deviceScaleFactor":dpr,"mobile":false}),
+    )?;
+    let ready = cdp.call("Runtime.evaluate", json!({"expression":"document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))", "awaitPromise":true}))?;
+    ensure!(
+        ready.get("exceptionDetails").is_none(),
+        "cannot wait for capture fonts"
+    );
+    cdp.eval("true")?;
+    let screenshot = cdp.call("Page.captureScreenshot", json!({"format":"png","captureBeyondViewport":true,"clip":{"x":0,"y":0,"width":width,"height":height,"scale":1}}))?;
+    let data = screenshot["data"]
+        .as_str()
+        .context("Chromium returned no PNG")?;
+    ensure!(
+        data.len() <= MAX_BYTES.div_ceil(3) * 4,
+        "encoded PNG exceeds size limit"
+    );
+    let png = STANDARD
+        .decode(data)
+        .context("invalid Chromium PNG encoding")?;
+    cdp.eval("true")?;
+    if mode == ChromiumMode::Desktop {
+        resample::half_png(&png, width, height, deadline).context("cannot resize Chromium PNG")
+    } else {
+        png_data::validate(&png).context("Chromium produced an invalid PNG")?;
+        remaining(deadline)?;
+        Ok(png)
+    }
 }
 
 fn remaining(deadline: Instant) -> Result<Duration> {
@@ -324,18 +451,6 @@ fn remaining(deadline: Instant) -> Result<Duration> {
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
         .context("Chromium rendering timed out")
-}
-fn dimension(bounds: &Value, size: &str, offset: &str) -> Result<u32> {
-    // Desktop adds one pixel after rounding to keep scrollbars out of the export.
-    let value = (bounds[size].as_f64().context("invalid render bounds")?
-        + bounds[offset].as_f64().context("invalid render bounds")?)
-    .ceil()
-        + 1.0;
-    ensure!(
-        value.is_finite() && value >= 2.0 && value <= (MAX_BYTES / 4) as f64,
-        "invalid or oversized render bounds"
-    );
-    Ok(value as u32)
 }
 
 struct Cdp {

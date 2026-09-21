@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use drawio_png_cli::{document, fonts, png_data, render, storage};
+use drawio_png_cli::{chromium::ChromiumMode, document, fonts, png_data, render, storage};
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -29,7 +29,7 @@ enum Command {
     },
     /// Embed XML into a PNG, rendering its first page unless --no-render is set
     #[command(
-        after_help = "Renderer environment:\n  DIP_DRAWIO_PATH / DIP_DRAWIO_ARGS  Desktop executable and options\n  DIP_CHROME_PATH / CHROME_PATH     Chromium or Chrome executable\n  DIP_CHROME_ARGS                   Additional POSIX-quoted options (no shell expansion)\n  DIP_DRAWIO_WEB_PATH               Local draw.io webapp directory (default: bundled assets)"
+        after_help = "Renderer environment:\n  DIP_DRAWIO_PATH / DIP_DRAWIO_ARGS  Desktop executable and options\n  DIP_CHROME_PATH / CHROME_PATH     Chromium or Chrome executable\n  DIP_CHROMIUM_MODE                 raw, desktop, or vscode (default: vscode)\n  DIP_CHROME_ARGS                   Additional POSIX-quoted options (no shell expansion)\n  DIP_DRAWIO_WEB_PATH               Local draw.io webapp directory (default: bundled assets)"
     )]
     Embed {
         /// XML file (omit to read stdin)
@@ -46,6 +46,9 @@ enum Command {
         /// Rendering backend (auto prefers Desktop, then Chromium)
         #[arg(long, value_enum, conflicts_with = "no_render")]
         renderer: Option<render::Renderer>,
+        /// Chromium output mode (overrides DIP_CHROMIUM_MODE; default: vscode)
+        #[arg(long, value_enum, conflicts_with = "no_render")]
+        chromium_mode: Option<ChromiumMode>,
         /// Allow external HTTP(S) images and fonts in Chromium
         #[arg(long, conflicts_with = "no_render")]
         allow_network: bool,
@@ -86,6 +89,7 @@ fn run(cli: Cli) -> Result<()> {
             no_render,
             no_validate,
             renderer,
+            chromium_mode,
             allow_network,
             default_font,
             fallback_font,
@@ -118,7 +122,12 @@ fn run(cli: Cli) -> Result<()> {
                     png_data::transparent()?
                 }
             } else {
-                render::render_selected(&xml, renderer.unwrap_or_default(), allow_network)?
+                render::render_selected_with_mode(
+                    &xml,
+                    renderer.unwrap_or_default(),
+                    allow_network,
+                    chromium_mode,
+                )?
             };
             let png = png_data::embed(&base, &xml)?;
             storage::atomic_write(&output, &png)?;

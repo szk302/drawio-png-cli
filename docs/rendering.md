@@ -1,51 +1,67 @@
-# DesktopとChromiumの描画互換性
+# Chromiumの出力モードと描画互換性
 
-VS Code draw.io拡張のPNG保存は別の書き出し経路を使い、以下のDesktop互換処理とは出力が一致しない。比較結果と検証範囲は [VS Code拡張とのPNG互換性](vscode-rendering.md) を参照。
+`dip embed --renderer chromium --chromium-mode raw|desktop|vscode` で出力方式を選ぶ。CLI指定がなければ `DIP_CHROMIUM_MODE` を読み、両方未指定なら `vscode`。モードを指定しても実行エンジンの選択は変わらない。`--renderer auto` はDesktopを優先し、Desktopが選ばれた場合の `--chromium-mode` 指定はエラーにする。
 
-Chromiumは描画開始前からDPR（deviceScaleFactor）を2に設定する。出力のCSS寸法は `ceil(bounds.size + bounds.offset) + 1` で求め、その縦横2倍のPNGを取得した後、RustでHamming1方式を使って半分へ縮小する。新しいCLIオプションは不要。
+`DIP_CHROMIUM_MODE` はChromiumが選ばれたときだけ参照し、CLIの明示モードを優先する。値は小文字の `raw`・`desktop`・`vscode` の完全一致とし、空文字・未知値・非Unicode値は描画前に拒否する。Desktop選択時、no-render、XML抽出・検証では参照しない。
 
-## 比較対象と縮小方式
+| モード | 描画・PNG取得 | 100×40矩形の検証寸法 |
+| --- | --- | --- |
+| `raw` | draw.ioエクスポーターをDPR 1で描画し、画面キャプチャをそのまま使用 | 103×43 |
+| `desktop` | DPR 2の画面キャプチャをHamming1で半分に縮小 | 104×44 |
+| `vscode`（既定） | `Editor.exportToCanvas()` でSVGを画像化しCanvasからPNGを取得 | 102×42 |
 
-基準はdraw.io Desktop 31.4.5 / Electron 44.2.0 / Chromium 152.0.7977.76をLinux ARM64の1倍表示のXvfb環境で実行した結果。
+全モードで先頭ページを描画し、全ページの編集用XMLを埋め込む。`raw` の「そのまま」はPNGの画素を縮小・再加工しないという意味で、XMLメタデータは追加する。
 
-Desktopのソースには `offscreen: { deviceScaleFactor: 2 }` と `capturePage()` 後の `img.resize(newBounds)` がある。ただし、後者だけを見て縮小方式を判断できない。
+`--renderer desktop` はDesktopアプリのCLIを呼ぶ。一方、`--renderer chromium --chromium-mode desktop` はDesktopアプリなしで互換処理を行う。
 
-実機のコピーへ計測を追加したところ、100×40の矩形を描画した画像は次の状態だった。
+## raw・desktopの画面キャプチャ
 
-- 描画ページのDPR: 2。
-- 物理ディスプレイの倍率: 1。
-- `capturePage()` から返った画像: 104×44、scale factor 1。
-- `resize()` 後も104×44。呼び出し前後のPNGバイト列は一致。
+draw.ioの `render()` に `format:png, scale:1, border:0, theme:light` を渡し、先頭ページと資材の読み込みを待つ。XMLの `scale`・`border` はこの2モードでは使わない。
 
-つまりこの環境では、画面取得時にすでに縮小されている。同じ矩形をChromiumで208×88として取得し、Electronの `nativeImage.resize({width:104,height:44,quality:'good'})` で縮小すると、Desktopの出力画素と完全一致した。`quality:'better'` でも同じ結果になる。これらの方式はHamming1である。
+`raw` は `ceil(bounds.size + bounds.offset)` の寸法でDPR 1のPNGを取得する。RustでPNGを検証し、画像データを再エンコードせずXMLを埋め込む。
 
-一方、`nativeImage.resize()` の品質省略時はLanczos3を選ぶ。同じ208×88画像にこの処理を適用すると、今回のDesktop出力とは一致しない。実装は観測したDesktopの出力に合わせてHamming1を採用した。
+`desktop` は上記寸法に縦横各1pxを追加し、DPR 2で取得してHamming1で半分に縮小する。Desktop 31.4.5 / Electron 44.2.0 / Linux ARM64 / Xvfbの1倍表示を参照した処理であり、文字なし矩形のRGBA一致を固定fixtureで確認する。文字・フォント・ブラウザー・Desktop側の表示倍率によって差は残る。
 
-参照元:
+Hamming1処理はChromiumのフィルター係数・固定小数点丸めに合わせたRust移植で、半透明と画像端も独立したElectron生成fixtureで検証する。このコードはBSD-3-Clauseのため、モード選択にかかわらず配布物にはライセンス表示を保持する。
 
-- [Electron v44.2.0 NativeImage::Resize](https://github.com/electron/electron/blob/v44.2.0/shell/common/api/electron_api_native_image.cc)
-- [Electron v44.2.0 WebContents::CapturePage](https://github.com/electron/electron/blob/v44.2.0/shell/browser/api/electron_api_web_contents.cc)
-- [Chromium 152 image_operations.cc](https://github.com/chromium/chromium/blob/152.0.7977.76/skia/ext/image_operations.cc)
-- [Chromium 152 convolver.cc](https://github.com/chromium/chromium/blob/152.0.7977.76/skia/ext/convolver.cc)
+rawの取得画像はRGBAで64 MiB（16,777,216画素）以下。desktopは2倍取得にも64 MiB制限を適用するため、最終画像は4,194,304画素以下。上限は取得前に検査し、desktopの縮小・PNG再エンコードも描画期限内で行う。
 
-## 画素の扱い
+## vscodeの比較対象
 
-Chromiumの固定小数点フィルターに合わせ、係数は14ビットの小数部で正規化し、水平方向・垂直方向の順に処理する。各段で8ビット値へ戻す。
+同梱Web資材はdraw.ioの `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`。これはローカルで調査したVS Code拡張（コミット `79500e6d467a95906a5f03680627c8f26ad3a0af`、package.jsonのバージョン1.9.0）が固定するサブモジュールと同じコミットである。
 
-アルファを乗算したRGB値を縮小し、PNG保存前に乗算を解除する。透明画素に残っているRGB値が周囲へにじむことを防ぐ。半透明の合成画像を使い、Electronが生成した独立した正解画像と比較している。
+拡張のWebview HTMLとメッセージ送受信をChromium 153.0.8010.47 / Linux ARM64上で再現して生成したPNGを基準にする。VS Code本体での実機検証ではない。拡張側はlightテーマ、`simpleLabels=false`、追加プラグイン・カスタムスタイルなし。OS・フォント・ブラウザー・Web資材・拡張設定が異なる場合の完全一致は保証しない。
 
-フィルターは2:1専用で、左右端と内部の係数だけを保持する。画像が横長でも係数の保存量は増えない。PNG取得後にRustの `png` クレートで処理するため、Node.js・Electron等の追加ランタイムは不要。
+変更前のDesktop互換方式との比較は [調査記録](vscode-rendering.md) に残している。Desktop互換の方式選定時の実測詳細はコミット `24dd930` の `docs/rendering.md` に保存されている。
 
-## 容量と時間の制限
+## vscodeの描画と保存
 
-出力幅W・高さHに対し、取得画像は2W×2H、RGBAバッファは `16 × W × H` bytesとなる。これを64 MiB以内に制限する。したがって最終画像の上限は4,194,304画素（例: 2048×2048）。これは以前の等倍取得より小さい上限になる。
+1. 全ページを検証・展開し、先頭ページの `mxGraphModel` を描画する。ページ間のセルID重複が干渉しないよう、描画用には先頭ページを独立したXML文書へ移す。
+2. draw.ioの `Editor.setGraphXml()` で背景・図形・ラベル等を読み込む。フォントの読み込み完了を待って再描画する。
+3. `mxfile` の `scale`（既定1）・`border`（既定0）を `exportToCanvas()` に渡す。倍率と余白の適用順もdraw.ioに従う。
+4. SVG内の画像・フォントを埋め込み、Canvasの `toDataURL('image/png')` からPNGを取得する。
+5. RustでPNGを検証し、全ページのXMLを埋め込んでアトミックに保存する。XMLはCLIの正規化結果を使い、拡張が再保存するXML文字列との完全一致は求めない。
 
-過大な取得画像はスクリーンショット要求前に拒否する。取得PNGの実寸法も検査し、不一致を拒否する。縮小処理では行ごと・横長画像では途中でも期限を確認し、PNG再エンコード後にも確認する。保存は従来どおりアトミックで、失敗時に既存出力を保持する。
+`scale`・`border` は拡張同様に `parseFloat` で読み取り、未指定・数値として読めない値は既定値を使う。0以下の倍率、負の余白、無限大はエラーにする。背景未指定・`none` は透明、明示された背景色はCanvasにも反映する。DPRは出力倍率に用いない。
 
-## 保証する範囲
+## vscodeの容量と時間の制限
 
-文字なし矩形のDesktop基準画像とのRGBA一致をChromium実機テストで確認する。縮小処理単独では、半透明・画像端を含むElectron生成の固定fixtureとのRGBA一致を通常テストで確認する。
+中間SVG画像と最終Canvasの寸法を画像化前に検査し、それぞれ一辺16,384px以下、RGBA換算64 MiB（16,777,216画素）以下に制限する。倍率を小さくしても中間SVGが上限を超えれば拒否する。極端な縦長・横長や巨大な倍率も拒否する。
 
-Desktopの取得方式は表示倍率等の影響を受ける。HiDPIディスプレイ、別のOS、別バージョンのDesktopの結果まで一致するとは限らない。また、同じ解像度と縮小方式でも、フォント・文字の測定・ブラウザーの描画に差があれば文字の位置・画像寸法・画素の差は残る。
+VS Code側の大画像に対する自動縮小は適用しない。CLIは上限超過をエラーにし、既存の出力を保持する。入力・取得PNG・ブラウザーの資材転送にも既存の64 MiB制限を適用し、JavaScript実行、PNG取得・検証を含めて60秒でタイムアウトする。
 
-フォント候補の指定については [フォント仕様](fonts.md) を参照する。
+## 外部資材
+
+外部画像・Webフォントのネットワーク取得は既定で禁止する。`vscode` モードでは `--allow-network` 使用時も、Canvasへ埋め込むには配信元のCORS許可が必要。draw.ioの公開画像プロキシへは転送しない。取得・デコードに失敗した資材を検出した場合はエラーにする。
+
+同梱資材で扱えない図形等には `DIP_DRAWIO_WEB_PATH` を利用できる。指定先の `export3.html` が、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` を提供する必要がある。別コミットの資材はVS Code互換性の検証対象外。
+
+## 回帰テスト
+
+vscodeの文字なし矩形と `scale=2, border=10` のPNGは、拡張の保存経路で独立生成した固定fixtureとRGBAを比較する。Desktop互換はDesktop基準fixtureと比較し、rawは直接取得の寸法とXML保持を確認する。複数ページの選択、透明背景・明示背景、HTML・埋め込み画像、外部画像の許可／禁止、容量超過、不正倍率、タイムアウトもChromium実機テストで確認する。
+
+```sh
+DIP_TEST_CHROME_PATH=/usr/bin/chromium \
+  DIP_TEST_CHROME_ARGS=--disable-dev-shm-usage \
+  mise exec -- cargo test --locked --test chromium -- --ignored --nocapture --test-threads=1
+```

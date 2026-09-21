@@ -10,11 +10,28 @@ These fixtures are original test data, not copied diagram assets.
 
 The metadata PNG fixtures above were constructed independently of `dip`, using Python standard-library `struct`, `zlib`, `base64`, and `urllib.parse`. Chunk CRCs use `zlib.crc32`; scanlines contain one PNG filter byte followed by four zero RGBA bytes. The fixtures are committed so tests need no Python runtime.
 
+## VS Code PNG reference images
+
+- `geometry-vscode.png`: 102x42 PNG produced by the VS Code extension's `xmlpng`
+  save path, using a rectangle at 10,20 with size 100x40, fill `#dae8fc`,
+  stroke `#6c8ebf`, and no label. The exact XML is inline in
+  `real_chromium_renders_first_page_and_preserves_xml`.
+- `geometry-options-vscode.png`: the same rectangle in an `mxfile` with
+  `scale="2" border="10"`, exported as 244x124.
+
+These images were generated independently of dip using the extension's Webview
+HTML at `79500e6d467a95906a5f03680627c8f26ad3a0af`, with draw.io assets pinned at
+`f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`, in Chromium 153.0.8010.47 on Linux
+ARM64. A test bridge supplied the VS Code message API; VS Code itself was not
+running. DPR 1 and 2 produced identical pixels. Both fixtures retain the PNG's
+embedded XML, but tests compare decoded RGBA only. See the
+[comparison record](../../docs/vscode-rendering.md) for details.
+
 ## Rendering and resizing reference images
 
 - `geometry-desktop.png`: the 104x44 output of draw.io Desktop 31.4.5 / Electron
   44.2.0, on Linux ARM64 with a 1x Xvfb display. The original rectangle input is
-  inline in `real_chromium_renders_first_page_and_preserves_xml`: position 10,20,
+  inline in `real_chromium_modes_select_distinct_outputs_and_preserve_xml`: position 10,20,
   size 100x40, fill `#dae8fc`, stroke `#6c8ebf`, no label. Stored as RGBA8 with
   unchanged pixels and no metadata for comparison with Chromium output.
 - `resize-input.png`: original 16x12 RGBA8 synthetic image, independently encoded

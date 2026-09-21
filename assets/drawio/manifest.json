@@ -1,10 +1,10 @@
 {
-  "revision": "744cb5420fdf126efd7a09b1d7082ca3e12c0841",
+  "revision": "f3abfe0f082c18f7b4fee8a34c2d07b1987687fd",
   "assets": [
     {
       "source": "src/main/webapp/js/viewer.min.js",
       "file": "js_viewer.min.js.gz",
-      "sha256": "2d0fef32815c79f1bb51f225effddfc57e111461bccf8386eed29c7cce3ab088"
+      "sha256": "ec8b66e744a9e5dbf3870129c297385595f55a548f75b952f209548d49610536"
     },
     {
       "source": "src/main/webapp/js/export-init.js",
