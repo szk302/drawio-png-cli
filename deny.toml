@@ -1,0 +1,14 @@
+[graph]
+all-features = true
+
+[licenses]
+include-dev = true
+include-build = true
+allow = [
+    "MIT",
+    "BSD-3-Clause",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unicode-3.0",
+    "Zlib",
+]
