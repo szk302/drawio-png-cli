@@ -38,6 +38,7 @@ pub(crate) struct AssetServer {
     worker: Option<JoinHandle<()>>,
 }
 
+// `root` must be canonicalized, as it is in `AssetServer::start`.
 fn local_file(root: &Path, url: &str) -> Result<PathBuf> {
     let decoded = crate::document::percent_decode(url.split('?').next().unwrap_or(url))?;
     let relative = decoded.strip_prefix('/').context("invalid asset path")?;
@@ -153,9 +154,57 @@ mod tests {
     fn web_root_rejects_traversal() {
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("ok.js"), "ok").unwrap();
-        assert!(local_file(root.path(), "/ok.js").is_ok());
+        // Match the server's precondition even when the temporary directory's
+        // path contains a symlink (for example, /var -> /private/var on macOS).
+        let canonical_root = root.path().canonicalize().unwrap();
+        assert_eq!(
+            local_file(&canonical_root, "/ok.js").unwrap(),
+            canonical_root.join("ok.js")
+        );
         for path in ["/../secret", "/%2e%2e/secret", "/%5csecret", "/C:/secret"] {
-            assert!(local_file(root.path(), path).is_err());
+            assert!(local_file(&canonical_root, path).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn server_accepts_symlinked_root_but_rejects_symlink_escape() {
+        use std::{
+            io::{Read, Write},
+            net::TcpStream,
+            os::unix::fs::symlink,
+        };
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("web");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("export3.html"), "test").unwrap();
+        fs::write(root.join("ok.js"), "ok").unwrap();
+        let secret = temp.path().join("secret.js");
+        fs::write(&secret, "secret").unwrap();
+        symlink(&secret, root.join("escape.js")).unwrap();
+        let alias = temp.path().join("alias");
+        symlink(&root, &alias).unwrap();
+
+        let server = AssetServer::start(Some(alias), false).unwrap();
+        let address = server.origin.strip_prefix("http://").unwrap();
+        for (path, status, body) in [
+            ("/ok.js", "200 OK", "ok"),
+            ("/escape.js", "404 Not Found", "asset not found"),
+        ] {
+            let mut stream = TcpStream::connect(address).unwrap();
+            let timeout = Some(Duration::from_secs(5));
+            stream.set_read_timeout(timeout).unwrap();
+            stream.set_write_timeout(timeout).unwrap();
+            write!(
+                stream,
+                "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            assert!(response.starts_with(&format!("HTTP/1.1 {status}\r\n")));
+            assert_eq!(response.split_once("\r\n\r\n").unwrap().1, body);
         }
     }
 }
