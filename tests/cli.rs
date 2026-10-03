@@ -225,3 +225,54 @@ fn commands_without_rendering_ignore_invalid_desktop_options() {
         .success()
         .stdout(MODEL);
 }
+
+#[test]
+fn base_images_with_broken_zlib_trailers_never_replace_output() {
+    // Rewrite IDAT with a valid chunk CRC so only the zlib stream is broken.
+    fn with_idat(edit: impl Fn(&mut Vec<u8>)) -> Vec<u8> {
+        let mut result = PLAIN[..8].to_vec();
+        let mut pos = 8;
+        while pos < PLAIN.len() {
+            let length = u32::from_be_bytes(PLAIN[pos..pos + 4].try_into().unwrap()) as usize;
+            let (kind, end) = (&PLAIN[pos + 4..pos + 8], pos + 12 + length);
+            if kind == b"IDAT" {
+                let mut data = PLAIN[pos + 8..pos + 8 + length].to_vec();
+                edit(&mut data);
+                result.extend_from_slice(&(data.len() as u32).to_be_bytes());
+                let start = result.len();
+                result.extend_from_slice(kind);
+                result.extend_from_slice(&data);
+                result.extend_from_slice(&crc32fast::hash(&result[start..]).to_be_bytes());
+            } else {
+                result.extend_from_slice(&PLAIN[pos..end]);
+            }
+            pos = end;
+        }
+        result
+    }
+    let directory = tempdir().unwrap();
+    let output = directory.path().join("out.png");
+    for (name, base) in [
+        ("bad-adler", with_idat(|d| *d.last_mut().unwrap() ^= 1)),
+        ("no-adler", with_idat(|d| d.truncate(d.len() - 4))),
+    ] {
+        assert!(png_data::validate(&base).is_err(), "{name}");
+        let path = directory.path().join(format!("{name}.png"));
+        fs::write(&path, &base).unwrap();
+        fs::write(&output, PLAIN).unwrap();
+        let result = dip()
+            .args(["embed", "--no-render", "-b"])
+            .arg(&path)
+            .arg("-o")
+            .arg(&output)
+            .write_stdin(MODEL)
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        assert!(String::from_utf8_lossy(&result).contains("invalid PNG image data"));
+        assert_eq!(fs::read(&output).unwrap(), PLAIN, "{name}");
+    }
+    png_data::validate(&with_idat(|_| ())).unwrap();
+}
