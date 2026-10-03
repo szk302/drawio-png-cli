@@ -60,8 +60,13 @@ fn chunks(bytes: &[u8]) -> Result<Vec<Chunk<'_>>> {
 }
 
 pub fn validate(bytes: &[u8]) -> Result<()> {
-    chunks(bytes)?;
+    let idat: Vec<u8> = chunks(bytes)?
+        .iter()
+        .filter(|c| c.kind == b"IDAT")
+        .flat_map(|c| c.data.iter().copied())
+        .collect();
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.ignore_checksums(false);
     decoder.set_limits(png::Limits { bytes: MAX_BYTES });
     decoder.set_ignore_text_chunk(true);
     let mut reader = decoder.read_info().context("invalid PNG header")?;
@@ -73,7 +78,38 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
         .next_frame(&mut vec![0; size])
         .context("invalid PNG image data")?;
     reader.finish().context("invalid PNG stream")?;
-    Ok(())
+    // The decoder stops once it has every scanline, so it accepts a zlib stream
+    // whose Adler-32 trailer is missing. --no-render copies IDAT unchanged.
+    zlib_complete(&idat).context("invalid PNG image data")
+}
+
+/// Check that the zlib stream reaches its end and checksum, discarding output.
+fn zlib_complete(bytes: &[u8]) -> Result<()> {
+    use flate2::{Decompress, FlushDecompress, Status};
+    let mut decoder = Decompress::new(true);
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let (before_in, before_out) = (decoder.total_in(), decoder.total_out());
+        let status = decoder
+            .decompress(
+                &bytes[before_in as usize..],
+                &mut buffer,
+                FlushDecompress::None,
+            )
+            .context("corrupt zlib stream")?;
+        // Scanlines add one filter byte per row to the decoded size checked above.
+        ensure!(
+            decoder.total_out() <= 2 * MAX_BYTES as u64,
+            "expanded data exceeds limit"
+        );
+        if status == Status::StreamEnd {
+            return Ok(());
+        }
+        ensure!(
+            decoder.total_in() != before_in || decoder.total_out() != before_out,
+            "truncated zlib stream"
+        );
+    }
 }
 
 fn diagram_payload<'a>(chunk: &'a Chunk<'_>) -> Option<&'a [u8]> {

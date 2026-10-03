@@ -38,6 +38,7 @@ rawの取得画像はRGBAで64 MiB（16,777,216画素）以下。desktopは2倍�
 
 1. 全ページを検証・展開し、先頭ページの `mxGraphModel` を描画する。ページ間のセルID重複が干渉しないよう、描画用には先頭ページを独立したXML文書へ移す。
 2. draw.ioの `Editor.setGraphXml()` で背景・図形・ラベル等を読み込む。フォントの読み込み完了を待って再描画する。
+   ラベルの `%page%`・`%pagenumber%`・`%pagecount%` は、拡張の `EditorUi` と同じくページ名・1・全ページ数に置換する。`raw`・`desktop` は上流 `export3.html` の処理に従い、Desktopと同様に `%pagecount%` を置換しない。
 3. `mxfile` の `scale`（既定1）・`border`（既定0）を `exportToCanvas()` に渡す。倍率と余白の適用順もdraw.ioに従う。
 4. SVG内の画像・フォントを埋め込み、Canvasの `toDataURL('image/png')` からPNGを取得する。
 5. RustでPNGを検証し、全ページのXMLを埋め込んでアトミックに保存する。XMLはCLIの正規化結果を使い、拡張が再保存するXML文字列との完全一致は求めない。
@@ -61,7 +62,7 @@ VS Code側の大画像に対する自動縮小は適用しない。CLIは上限�
 vscodeの文字なし矩形と `scale=2, border=10` のPNGは、拡張の保存経路で独立生成した固定fixtureとRGBAを比較する。Desktop互換はDesktop基準fixtureと比較し、rawは直接取得の寸法とXML保持を確認する。複数ページの選択、透明背景・明示背景、HTML・埋め込み画像、外部画像の許可／禁止、容量超過、不正倍率、タイムアウトもChromium実機テストで確認する。
 
 ```sh
-DIP_TEST_CHROME_PATH=/usr/bin/chromium \
+DIP_TEST_CHROME_PATH=/usr/bin/google-chrome \
   DIP_TEST_CHROME_ARGS=--disable-dev-shm-usage \
   mise exec -- cargo test --locked --test chromium -- --ignored --nocapture --test-threads=1
 ```

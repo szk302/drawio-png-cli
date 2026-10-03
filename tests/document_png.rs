@@ -238,3 +238,40 @@ fn compressed_page_comments_cdata_and_processing_instructions_survive() {
     assert!(expanded.starts_with("<?xml-stylesheet encoding='UTF-16'?>"));
     assert!(!expanded.contains("<![CDATA["));
 }
+
+#[test]
+fn compressed_page_split_across_text_and_cdata_expands_fully() {
+    let doc = roxmltree::Document::parse(MIXED).unwrap();
+    let page = doc
+        .root_element()
+        .children()
+        .find(|n| n.has_tag_name("diagram"))
+        .unwrap();
+    let compressed = page.text().unwrap();
+    let expected =
+        document::normalize(&format!("<mxfile><diagram>{compressed}</diagram></mxfile>")).unwrap();
+    let (head, tail) = compressed.split_at(compressed.len() / 2);
+    for content in [
+        format!("\n  <![CDATA[{compressed}]]>\n"),
+        format!("<![CDATA[{head}]]><![CDATA[{tail}]]>"),
+        format!("{head}<![CDATA[{tail}]]>"),
+        format!("<![CDATA[{head}]]>{tail}"),
+        format!(" <!--a--> <![CDATA[{head}]]>{tail} <?pi x?> "),
+    ] {
+        let input = format!("<mxfile><diagram>{content}</diagram></mxfile>");
+        let expanded = document::normalize(&input).unwrap();
+        document::validate(&input).unwrap();
+        document::validate(&expanded).unwrap();
+        assert!(!expanded.contains("CDATA"), "{expanded}");
+        let without_extras = expanded.replace("<!--a-->", "").replace("<?pi x?>", "");
+        assert_eq!(without_extras, expected, "{content}");
+        if content.contains("<!--a-->") {
+            assert!(expanded.contains("<!--a-->") && expanded.contains("<?pi x?>"));
+        }
+        // The extract -> embed path must accept the expanded document again.
+        let png = png_data::embed(PLAIN, &input).unwrap();
+        let extracted = document::normalize(&png_data::extract(&png).unwrap()).unwrap();
+        document::validate(&extracted).unwrap();
+        assert_eq!(extracted, expanded);
+    }
+}

@@ -167,7 +167,7 @@ draw.io Desktop 27.0.2 以降と Chromium / Chrome のヘッドレス描画に�
 * `--no-render` では Desktop を検索・起動せず、ベース画像または新規透明 PNG にメタデータを保存する。
 * Linux のディスプレイがない環境では利用者が Xvfb 等を用意する。`dip` は sandbox を自動無効化しない。
 * `embed --renderer auto|desktop|chromium` を提供し、既定は `auto`。Desktopが見つからないときだけChromiumへ切り替え、明示指定の不正や描画失敗では切り替えない。
-* Chromiumの検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS標準パス。`DIP_CHROME_ARGS` はPOSIX形式で分割し、シェルを起動しない。
+* Chromiumの検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS標準パス。PATH・OS標準パスでは Chrome を Chromium より優先する。`DIP_CHROME_ARGS` はPOSIX形式で分割し、シェルを起動しない。
 * Chromiumは基本描画資材をバイナリに同梱し、`DIP_DRAWIO_WEB_PATH` で `export3.html` を含むローカルWeb資材を指定できる。不正指定ではエラーとし、資材の自動取得はしない。
 * 同梱対象は基本図形・接続線・日本語・HTMLラベル・埋め込み画像。追加アイコン・ステンシル、数式・Mermaid・自動レイアウト資材は除外。必要資材が欠ける図面や未知の図形ではエラーにする。
 * 外部HTTP(S)画像・フォント等の取得は既定で禁止。Chromium専用の `--allow-network` で許可できる。`--renderer` / `--allow-network` と `--no-render` は引数エラー。

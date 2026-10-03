@@ -309,6 +309,134 @@ fn real_chromium_modes_select_distinct_outputs_and_preserve_xml() {
 
 #[test]
 #[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_renders_embedded_stencils_in_all_modes() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::io::Write;
+    let (program, args) = browser();
+    let deflate = |text: &str| {
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(urlencoding::encode(text).as_bytes())
+            .unwrap();
+        encoder.finish().unwrap()
+    };
+    let shape = r#"<shape w="100" h="40" aspect="variable" strokewidth="inherit"><background><rect x="0" y="0" w="100" h="40"/></background><foreground><fillstroke/></foreground></shape>"#;
+    let cell = |shape: &str| {
+        format!(
+            r##"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" vertex="1" parent="1" style="{shape}fillColor=#dae8fc;strokeColor=#6c8ebf;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></root></mxGraphModel>"##
+        )
+    };
+    let stencil = |bytes: &[u8]| cell(&format!("shape=stencil({});", STANDARD.encode(bytes)));
+    let render = |xml: &str, mode| {
+        chromium::render_with_mode(
+            &program,
+            xml,
+            Duration::from_secs(60),
+            &args,
+            None,
+            false,
+            mode,
+        )
+    };
+    // The stencil draws the same rectangle as the built-in shape, offline.
+    for mode in [
+        chromium::ChromiumMode::Raw,
+        chromium::ChromiumMode::Desktop,
+        chromium::ChromiumMode::Vscode,
+    ] {
+        assert_eq!(
+            pixels(&render(&stencil(&deflate(shape)), mode).unwrap()),
+            pixels(&render(&cell(""), mode).unwrap()),
+            "{mode:?}"
+        );
+    }
+    let truncated = deflate(shape);
+    for broken in [
+        stencil(b"not deflate"),
+        stencil(&truncated[..truncated.len() / 2]),
+        stencil(&deflate("<notshape/>")),
+        cell("shape=stencil(!!!);"),
+    ] {
+        let error = format!(
+            "{:#}",
+            render(&broken, chromium::ChromiumMode::Vscode).unwrap_err()
+        );
+        assert!(error.contains("Invalid embedded stencil"), "{error}");
+    }
+    // Upstream would silently omit an unresolved include-shape and save a blank image.
+    let missing = stencil(&deflate(
+        r#"<shape w="100" h="40"><foreground><include-shape name="mxgraph.missing.shape" x="0" y="0" w="100" h="40"/></foreground></shape>"#,
+    ));
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.png");
+    let original = include_bytes!("fixtures/text.drawio.png");
+    for mode in ["raw", "desktop", "vscode"] {
+        fs::write(&output, original).unwrap();
+        let result = dip()
+            .env("DIP_CHROME_PATH", &program)
+            .env("DIP_CHROME_ARGS", shell_words::join(&args))
+            .args([
+                "embed",
+                "--renderer",
+                "chromium",
+                "--chromium-mode",
+                mode,
+                "-o",
+            ])
+            .arg(&output)
+            .write_stdin(missing.as_str())
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        let error = String::from_utf8_lossy(&result);
+        assert!(
+            error.contains("mxgraph.missing.shape (include-shape)"),
+            "{mode}: {error}"
+        );
+        assert_eq!(fs::read(&output).unwrap(), original, "{mode}");
+    }
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_vscode_resolves_page_placeholders() {
+    let model = |label: &str, placeholders: u8| {
+        format!(
+            r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><object id="2" label="{label}" placeholders="{placeholders}"><mxCell vertex="1" parent="1" style="whiteSpace=wrap;html=1;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></object></root></mxGraphModel>"#
+        )
+    };
+    let label = "%page% %pagenumber%/%pagecount% %pagecount+1%";
+    let file = |first: String, pages: usize| {
+        let mut xml = format!("<mxfile><diagram name=\"First\">{first}</diagram>");
+        for _ in 1..pages {
+            xml += &format!("<diagram name=\"Other\">{}</diagram>", model("x", 0));
+        }
+        xml + "</mxfile>"
+    };
+    let image = |xml: &str| pixels(&render(xml, None, false).unwrap());
+    // Without EditorUi, upstream Graph leaves %pagecount% unresolved.
+    assert_eq!(
+        image(&model(label, 1)),
+        image(&model(" 1/1 2", 1)),
+        "single model"
+    );
+    for pages in [1, 3] {
+        assert_eq!(
+            image(&file(model(label, 1), pages)),
+            image(&file(
+                model(&format!("First 1/{pages} {}", pages + 1), 0),
+                pages
+            )),
+            "{pages} pages"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
 fn real_chromium_local_assets_and_unsupported_content() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
@@ -558,6 +686,35 @@ mod unix {
         assert!(!error.contains("desktop-selected"));
         assert!(!error.contains("browser-selected"));
         assert_eq!(fs::read(&output).unwrap(), b"original");
+    }
+
+    #[test]
+    fn path_search_prefers_chrome_over_earlier_chromium() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, second) = (dir.path().join("first"), dir.path().join("second"));
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        script(&first, "chromium", "echo chromium-selected >&2; exit 4");
+        let path = std::env::join_paths([&first, &second]).unwrap();
+        let output = dir.path().join("out.png");
+        let selected = || {
+            let result = dip()
+                .env("PATH", &path)
+                .args(["embed", "--renderer", "chromium", "-o"])
+                .arg(&output)
+                .write_stdin(MODEL)
+                .assert()
+                .code(1)
+                .get_output()
+                .stderr
+                .clone();
+            String::from_utf8_lossy(&result).into_owned()
+        };
+        assert!(selected().contains("chromium-selected"));
+        script(&second, "google-chrome", "echo chrome-selected >&2; exit 4");
+        let error = selected();
+        assert!(error.contains("chrome-selected"));
+        assert!(!error.contains("chromium-selected"));
     }
 
     #[test]

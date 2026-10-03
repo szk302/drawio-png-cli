@@ -8,7 +8,8 @@ hashes of their decompressed bytes. They are stored with deterministic gzip
 headers and embedded into `dip`. `chromium.html`, `chromium-init.js`, and
 `chromium-render.js` in the parent directory are original MIT-licensed dip
 integration code; they configure local URLs, disable optional bundled math,
-check unsupported shapes, and select `Editor.exportToCanvas()` for the `vscode`
+check unsupported shapes, decode embedded `shape=stencil(...)` shapes with a
+size limit, and select `Editor.exportToCanvas()` for the `vscode`
 mode or `render()` for the `raw` and `desktop` capture modes.
 The revision matches the draw.io submodule pinned by the inspected
 [`hediet.vscode-drawio`](https://github.com/hediet/vscode-drawio) extension

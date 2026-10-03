@@ -98,16 +98,17 @@ dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png \
 
 ## Chromium / Chrome の準備
 
-検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS 標準インストール先です。PATH では `chromium`、`chromium-browser`、`google-chrome`、`google-chrome-stable`、`chrome`（Windows では `chromium.exe` / `chrome.exe`）を探します。明示指定のパスが不正な場合は別候補へ切り替えません。
+既定では Chrome を使用し、Chrome が見つからない場合だけ Chromium を使います。検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS 標準インストール先です。PATH ではまず Chrome（`google-chrome`、`google-chrome-stable`、`chrome`、Windows では `chrome.exe`）をすべてのディレクトリから探し、なければ Chromium（`chromium`、`chromium-browser`、Windows では `chromium.exe`）を探します。Linux の標準インストール先は `/usr/bin/google-chrome`、`/opt/google/chrome/chrome`、`/usr/bin/chromium` の順です。明示指定のパスが不正な場合は別候補へ切り替えません。
 
 ```sh
+# Chromium を使う場合は明示する
 export DIP_CHROME_PATH=/usr/bin/chromium
 dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 ```
 
 ヘッドレスで起動するため Xvfb は不要です。Node.js、Python、ChromeDriver、オンライン版 draw.io への接続も不要です。フォントはOSにインストールされたものを使用するので、日本語には日本語フォントを用意してください。
 
-同梱資材は基本図形・接続線・日本語・HTMLラベル・埋め込み画像に対応します。追加アイコン・ステンシル、数式、Mermaid、自動レイアウトの資材は含みません。未知の図形や必要資材の欠落はエラーになります。同梱資材で対応できない図面には、Desktop または別途用意した draw.io Web資材を指定してください。
+同梱資材は基本図形・接続線・日本語・HTMLラベル・埋め込み画像・埋め込みステンシル（`shape=stencil(...)`）に対応します。埋め込みステンシルは展開後の合計64 MiBまでとし、壊れたデータや、`include-shape` で参照する図形が見つからない場合はエラーにします。追加アイコン・ステンシル、数式、Mermaid、自動レイアウトの資材は含みません。未知の図形や必要資材の欠落はエラーになります。同梱資材で対応できない図面には、Desktop または別途用意した draw.io Web資材を指定してください。
 
 ```sh
 # export3.html を含む Webアプリのルートを指定
@@ -186,6 +187,7 @@ exec xvfb-run -a /opt/drawio/drawio "$@"
 
 - 入力 XML は UTF-8（BOM 可）。XML 構文、`mxfile`／`mxGraphModel` ルート、各ページの `root` 直下の基盤セル `id="0"`・`id="1"` を検証します。空の図面や壊れた圧縮ページは拒否します。
 - 構造検証は、すべての描画・レイアウト不具合を防ぐ保証ではありません。
+- PNG はチャンクの CRC に加え、画像データ（IDAT）の zlib ストリームが終端し Adler-32 が一致することを検査します。ベース画像・レンダラー出力が壊れている場合は既存出力を変更せずエラーにします。
 - `tEXt`／`zTXt` の `mxfile`／`mxGraphModel` を読み取り、旧 Desktop の raw DEFLATE、URL エンコードの二重化にも対応します。競合する複数の図面メタデータは拒否します。
 - 抽出時は全ページを非圧縮 XML にします。ページ順・名前・属性・未知要素を保持しますが、元の XML 文字列との完全一致は保証しません。
 - 保存時は既存の図面メタデータを置換し、URL エンコードした XML を一つの `tEXt` チャンクへ格納します。ベース画像の画像データ・無関係なチャンクは保持します。
@@ -212,7 +214,7 @@ DIP_TEST_DRAWIO_PATH=/path/to/drawio-or-wrapper \
 ```
 
 ```sh
-DIP_TEST_CHROME_PATH=/usr/bin/chromium \
+DIP_TEST_CHROME_PATH=/usr/bin/google-chrome \
   mise exec -- cargo test --test chromium -- --ignored --nocapture
 # テスト環境に必要な追加引数は DIP_TEST_CHROME_ARGS で指定
 python3 scripts/vendor_drawio.py --check

@@ -10,7 +10,9 @@ use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     io::ErrorKind,
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
@@ -34,58 +36,70 @@ pub fn discover() -> Result<PathBuf> {
                 .with_context(|| format!("cannot resolve {key}"));
         }
     }
-    let names: &[&str] = if cfg!(windows) {
-        &["chromium.exe", "chrome.exe"]
+    // Chrome is the default; Chromium is used only when no Chrome is installed.
+    let groups: [&[&str]; 2] = if cfg!(windows) {
+        [&["chrome.exe"], &["chromium.exe"]]
     } else {
-        &[
-            "chromium",
-            "chromium-browser",
-            "google-chrome",
-            "google-chrome-stable",
-            "chrome",
+        [
+            &["google-chrome", "google-chrome-stable", "chrome"],
+            &["chromium", "chromium-browser"],
         ]
     };
     if let Some(path) = env::var_os("PATH") {
-        for directory in env::split_paths(&path) {
-            for name in names {
-                let candidate = directory.join(name);
-                if executable(&candidate) {
-                    return Ok(candidate.canonicalize()?);
+        let directories: Vec<_> = env::split_paths(&path).collect();
+        for names in groups {
+            for directory in &directories {
+                for name in names {
+                    let candidate = directory.join(name);
+                    if executable(&candidate) {
+                        return Ok(candidate.canonicalize()?);
+                    }
                 }
             }
         }
     }
-    let mut paths: Vec<PathBuf> = Vec::new();
-    match env::consts::OS {
-        "macos" => {
-            for base in [
-                Some(PathBuf::from("/Applications")),
-                env::var_os("HOME").map(|h| PathBuf::from(h).join("Applications")),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                paths.push(base.join("Google Chrome.app/Contents/MacOS/Google Chrome"));
-                paths.push(base.join("Chromium.app/Contents/MacOS/Chromium"));
-            }
-        }
-        "windows" => {
-            for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-                if let Some(base) = env::var_os(key) {
-                    paths.push(PathBuf::from(&base).join("Google/Chrome/Application/chrome.exe"));
-                    paths.push(PathBuf::from(base).join("Chromium/Application/chrome.exe"));
-                }
-            }
-        }
-        _ => paths.extend([
-            PathBuf::from("/usr/bin/chromium"),
-            PathBuf::from("/usr/bin/google-chrome"),
-        ]),
-    }
+    let paths = standard_paths(env::consts::OS, |key| env::var_os(key));
     paths
         .into_iter()
         .find(|p| executable(p))
         .context("Chromium/Chrome not found; set DIP_CHROME_PATH or use --no-render")
+}
+
+/// Standard install locations, with every Chrome candidate before any Chromium.
+fn standard_paths(os: &str, var: impl Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
+    let (mut chrome, mut chromium) = (Vec::new(), Vec::new());
+    match os {
+        "macos" => {
+            for base in [
+                Some(PathBuf::from("/Applications")),
+                var("HOME").map(|h| PathBuf::from(h).join("Applications")),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                chrome.push(base.join("Google Chrome.app/Contents/MacOS/Google Chrome"));
+                chromium.push(base.join("Chromium.app/Contents/MacOS/Chromium"));
+            }
+        }
+        "windows" => {
+            for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+                if let Some(base) = var(key) {
+                    let base = PathBuf::from(base);
+                    chrome.push(base.join("Google/Chrome/Application/chrome.exe"));
+                    chromium.push(base.join("Chromium/Application/chrome.exe"));
+                }
+            }
+        }
+        _ => {
+            chrome.extend([
+                PathBuf::from("/usr/bin/google-chrome"),
+                PathBuf::from("/opt/google/chrome/chrome"),
+            ]);
+            chromium.push(PathBuf::from("/usr/bin/chromium"));
+        }
+    }
+    chrome.append(&mut chromium);
+    chrome
 }
 
 fn extra_args() -> Result<Vec<String>> {
@@ -625,5 +639,43 @@ impl Drop for WindowsJob {
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(self.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standard_paths_list_chrome_before_chromium_in_earlier_locations() {
+        let macos = standard_paths("macos", |key| (key == "HOME").then(|| "/Users/u".into()));
+        assert_eq!(
+            macos,
+            [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Users/u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Users/u/Applications/Chromium.app/Contents/MacOS/Chromium",
+            ]
+            .map(PathBuf::from)
+        );
+        let windows = standard_paths("windows", |key| match key {
+            "ProgramFiles" => Some("P".into()),
+            "LOCALAPPDATA" => Some("L".into()),
+            _ => None,
+        });
+        assert_eq!(
+            windows,
+            [
+                PathBuf::from("P").join("Google/Chrome/Application/chrome.exe"),
+                PathBuf::from("L").join("Google/Chrome/Application/chrome.exe"),
+                PathBuf::from("P").join("Chromium/Application/chrome.exe"),
+                PathBuf::from("L").join("Chromium/Application/chrome.exe"),
+            ]
+        );
+        assert_eq!(
+            standard_paths("linux", |_| None).last(),
+            Some(&PathBuf::from("/usr/bin/chromium"))
+        );
     }
 }
