@@ -83,6 +83,9 @@ async function dipRender(xml, bundled, mode) {
     graph.getGlobalVariable = function(name) {
         if (name === 'page') return page.nodeName === 'diagram' ? page.getAttribute('name') : '';
         if (name === 'pagenumber') return 1;
+        // EditorUi normally supplies this; count pages before the first is separated.
+        if (name === 'pagecount') return file.nodeName === 'mxfile'
+            ? Array.from(file.children).filter(n => n.nodeName === 'diagram').length : 1;
         return getGlobalVariable.apply(this, arguments);
     };
     // mxCodec resolves IDs through the owner document. Separate the page so

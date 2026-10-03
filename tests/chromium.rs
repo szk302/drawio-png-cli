@@ -368,6 +368,41 @@ fn real_chromium_renders_embedded_stencils_in_all_modes() {
 
 #[test]
 #[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_vscode_resolves_page_placeholders() {
+    let model = |label: &str, placeholders: u8| {
+        format!(
+            r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><object id="2" label="{label}" placeholders="{placeholders}"><mxCell vertex="1" parent="1" style="whiteSpace=wrap;html=1;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></object></root></mxGraphModel>"#
+        )
+    };
+    let label = "%page% %pagenumber%/%pagecount% %pagecount+1%";
+    let file = |first: String, pages: usize| {
+        let mut xml = format!("<mxfile><diagram name=\"First\">{first}</diagram>");
+        for _ in 1..pages {
+            xml += &format!("<diagram name=\"Other\">{}</diagram>", model("x", 0));
+        }
+        xml + "</mxfile>"
+    };
+    let image = |xml: &str| pixels(&render(xml, None, false).unwrap());
+    // Without EditorUi, upstream Graph leaves %pagecount% unresolved.
+    assert_eq!(
+        image(&model(label, 1)),
+        image(&model(" 1/1 2", 1)),
+        "single model"
+    );
+    for pages in [1, 3] {
+        assert_eq!(
+            image(&file(model(label, 1), pages)),
+            image(&file(
+                model(&format!("First 1/{pages} {}", pages + 1), 0),
+                pages
+            )),
+            "{pages} pages"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
 fn real_chromium_local_assets_and_unsupported_content() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
