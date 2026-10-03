@@ -59,6 +59,41 @@ cp "$(dirname "$0")/plain.png" "$7"
 }
 
 #[test]
+fn font_preferences_reach_desktop_and_the_embedded_xml() {
+    let (directory, path) = script(
+        r#"
+cp "$8" "$(dirname "$0")/received.xml"
+cp "$(dirname "$0")/plain.png" "$7"
+"#,
+    );
+    let output = directory.path().join("output.png");
+    dip()
+        .env("DIP_DRAWIO_PATH", &path)
+        .args([
+            "embed",
+            "--renderer",
+            "desktop",
+            "--default-font",
+            "Noto Sans CJK JP",
+            "--fallback-font",
+            "Noto Color Emoji",
+            "-o",
+        ])
+        .arg(&output)
+        .write_stdin(MIXED)
+        .assert()
+        .success();
+    let xml = png_data::extract(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(
+        fs::read_to_string(directory.path().join("received.xml")).unwrap(),
+        xml
+    );
+    assert_eq!(xml.matches("fontFamily=").count(), 2);
+    assert!(xml.contains("Noto Sans CJK JP"));
+    assert!(xml.contains("Noto Color Emoji"));
+}
+
+#[test]
 fn renderer_failures_and_invalid_output_are_errors() {
     for body in [
         "echo 'failure detail' >&2; exit 3",

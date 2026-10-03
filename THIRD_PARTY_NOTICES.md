@@ -2,8 +2,38 @@
 
 This project's original code is licensed under the MIT License in [LICENSE](LICENSE).
 Third-party works retain their own copyright notices and license terms.
-This file documents implementation references; it is not an exhaustive license
-inventory of Cargo dependencies.
+This file documents bundled works and implementation references. Cargo dependency
+notices and full license texts are in
+[`assets/licenses/cargo-dependencies.txt`](assets/licenses/cargo-dependencies.txt).
+That generated inventory covers all targets and includes build and development
+dependencies; not every listed crate is linked into every binary. It selects
+permitted license alternatives according to `about.toml` and retains combined
+license requirements. `dip licenses` prints this file and the license texts.
+
+## Chromium-compatible image resizing
+
+The Chromium `desktop` output mode uses `src/resample.rs`, which adapts the Hamming1 filter generation and fixed-point channel
+rounding used by Chromium's `skia/ext/image_operations.cc` (Copyright 2012 The
+Chromium Authors) and `skia/ext/convolver.{cc,h}` (Copyright 2011 The Chromium
+Authors), reviewed at Chromium `152.0.7977.76`. The Rust implementation is limited
+to 2:1 downsampling and uses bounded edge/interior kernel storage. It is licensed
+under BSD-3-Clause; the full license is in
+[`assets/licenses/chromium-BSD-3-Clause.txt`](assets/licenses/chromium-BSD-3-Clause.txt)
+and is also printed by `dip licenses`.
+
+The behavior reference is Electron `v44.2.0`
+[`NativeImage::Resize`](https://github.com/electron/electron/blob/v44.2.0/shell/common/api/electron_api_native_image.cc),
+whose `good` and `better` quality settings use Chromium's Hamming1 path. The
+choice was verified against draw.io Desktop 31.4.5's actual capture output on a
+1x Linux display; capture has already downsampled before Desktop calls resize.
+No Electron code or runtime is bundled for this feature.
+
+Retain this notice and the BSD license in source and binary distributions.
+
+The BSD license text is copied from
+[Chromium's root LICENSE at 152.0.7977.76](https://github.com/chromium/chromium/blob/152.0.7977.76/LICENSE).
+Its 2015 copyright notice is retained verbatim; the 2011 and 2012 notices above
+belong to the individual source files used by the resampling adaptation.
 
 ## drawio-exporter
 
@@ -48,6 +78,27 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## VS Code Draw.io Integration (reference only)
+
+- Project: https://github.com/hediet/vscode-drawio (`hediet.vscode-drawio`)
+- Reviewed revision: `79500e6d467a95906a5f03680627c8f26ad3a0af`
+- Upstream license: GPL version 3 (`GPL-3.0` in its `package.json`);
+  [license text at the reviewed revision](https://github.com/hediet/vscode-drawio/blob/79500e6d467a95906a5f03680627c8f26ad3a0af/LICENSE.md).
+
+The extension was inspected to understand the message protocol and export options
+in `src/DrawioClient/webview-content.html` and the `xmlpng` save path through
+`src/DrawioClient/DrawioClient.ts` and `src/DrawioEditorProviderBinary.ts`.
+dip's integration was written separately; extension source code is not copied
+or bundled, and the extension is not a build or runtime dependency.
+
+`tests/fixtures/geometry-vscode.png` and `geometry-options-vscode.png` are outputs
+of that save path for this project's original rectangle diagrams, not copies of
+extension code or artwork. A local test bridge ran the extension's Webview HTML
+with its pinned draw.io assets to generate these fixtures. See
+[fixture provenance](tests/fixtures/README.md). The GPL reference here describes
+the inspected extension, not the license of dip or the independently authored
+test diagrams. The separately bundled draw.io assets retain the licenses below.
+
 ## Other implementation references
 
 - [drawio](https://github.com/jgraph/drawio), revision `744cb5420`:
@@ -58,7 +109,32 @@ SOFTWARE.
   [Upstream license: Apache-2.0](https://github.com/jgraph/drawio-desktop/blob/60ec92a/LICENSE).
 
 The local reference checkouts and Desktop test installation in `.tmp/` are not
-included in this project's source package. dip calls a separately installed
-Desktop executable; it does not bundle the application or draw.io rendering
-assets. The test diagrams and PNG fixtures were generated for this project;
+included in this project's source package. dip calls a separately installed Desktop or Chromium executable.
+The Chromium renderer bundles the limited subset described below. The test diagrams and PNG fixtures were generated for this project;
 see [the fixture provenance](tests/fixtures/README.md).
+
+## Bundled Chromium renderer assets
+
+The Chromium renderer embeds an unmodified, gzip-compressed subset of draw.io
+at revision `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`. This differs from the
+reference-only use of the Desktop checkout described above.
+
+See [the asset inventory](assets/drawio/README.md),
+[the source/hash manifest](assets/drawio/manifest.json), and
+[full license texts](assets/drawio/licenses/). The bundle includes Apache-2.0,
+MIT and Zlib works; those assets are not relicensed under dip's MIT license.
+Separately restricted additional icon/stencil packs and their compiled bundles
+are excluded. All retained notices and license texts are accessible in standalone
+binaries through `dip licenses`.
+
+Source and binary archives must retain this file, `LICENSE`,
+`assets/drawio/README.md`, `assets/drawio/licenses/`, and `assets/licenses/`
+(including the generated Cargo dependency notices). No runtime or build-time
+asset download is performed.
+
+The headless export integration calls draw.io's `Editor.exportToCanvas()` in
+`vscode` mode, matching the extension's `xmlpng` save path. The `raw` and
+`desktop` modes use draw.io's `render` / `LoadingComplete` capture protocol.
+The VS Code extension reference is described above. Chromium and Electron runtimes
+are not bundled. The Desktop-compatible resizing
+code described above is included in dip.

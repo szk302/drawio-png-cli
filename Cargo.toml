@@ -3,7 +3,7 @@ name = "drawio-png-cli"
 version = "0.1.0"
 edition = "2024"
 description = "Extract, validate, and embed editable draw.io diagrams in PNG files"
-license = "MIT"
+license = "MIT AND Apache-2.0 AND Zlib AND BSD-3-Clause"
 repository = "https://github.com/szk302/drawio-png-cli"
 
 [[bin]]
@@ -18,8 +18,11 @@ crc32fast = "1"
 flate2 = "1"
 png = "0.18"
 roxmltree = "0.21"
+serde_json = "1"
 shell-words = "1"
 tempfile = "3"
+tiny_http = "0.12.0"
+tungstenite = "0.30.0"
 urlencoding = "2"
 
 [dev-dependencies]
@@ -27,3 +30,6 @@ assert_cmd = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
