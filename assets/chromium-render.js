@@ -50,6 +50,18 @@ async function dipRender(xml, bundled, mode) {
         stencils.set(data, stencil);
         return stencil;
     };
+    // Upstream silently skips an include-shape whose stencil is not loaded. Check
+    // at draw time so nested references and registry stencils are covered too.
+    const drawNode = mxStencil.prototype.drawNode;
+    mxStencil.prototype.drawNode = function(canvas, shape, node) {
+        if (node.nodeName === 'include-shape') {
+            const name = node.getAttribute('name');
+            if (!mxStencilRegistry.getStencil(name)) {
+                throw Error('Unsupported shape: ' + name + ' (include-shape); provide assets with DIP_DRAWIO_WEB_PATH');
+            }
+        }
+        return drawNode.apply(this, arguments);
+    };
     mxCellRenderer.prototype.createShape = function(state) {
         const name = state.style[mxConstants.STYLE_SHAPE];
         if (typeof name === 'string' && name.startsWith('stencil(') && name.endsWith(')')) {

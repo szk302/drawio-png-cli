@@ -364,6 +364,40 @@ fn real_chromium_renders_embedded_stencils_in_all_modes() {
         );
         assert!(error.contains("Invalid embedded stencil"), "{error}");
     }
+    // Upstream would silently omit an unresolved include-shape and save a blank image.
+    let missing = stencil(&deflate(
+        r#"<shape w="100" h="40"><foreground><include-shape name="mxgraph.missing.shape" x="0" y="0" w="100" h="40"/></foreground></shape>"#,
+    ));
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.png");
+    let original = include_bytes!("fixtures/text.drawio.png");
+    for mode in ["raw", "desktop", "vscode"] {
+        fs::write(&output, original).unwrap();
+        let result = dip()
+            .env("DIP_CHROME_PATH", &program)
+            .env("DIP_CHROME_ARGS", shell_words::join(&args))
+            .args([
+                "embed",
+                "--renderer",
+                "chromium",
+                "--chromium-mode",
+                mode,
+                "-o",
+            ])
+            .arg(&output)
+            .write_stdin(missing.as_str())
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        let error = String::from_utf8_lossy(&result);
+        assert!(
+            error.contains("mxgraph.missing.shape (include-shape)"),
+            "{mode}: {error}"
+        );
+        assert_eq!(fs::read(&output).unwrap(), original, "{mode}");
+    }
 }
 
 #[test]
