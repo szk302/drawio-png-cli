@@ -561,6 +561,35 @@ mod unix {
     }
 
     #[test]
+    fn path_search_prefers_chrome_over_earlier_chromium() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, second) = (dir.path().join("first"), dir.path().join("second"));
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        script(&first, "chromium", "echo chromium-selected >&2; exit 4");
+        let path = std::env::join_paths([&first, &second]).unwrap();
+        let output = dir.path().join("out.png");
+        let selected = || {
+            let result = dip()
+                .env("PATH", &path)
+                .args(["embed", "--renderer", "chromium", "-o"])
+                .arg(&output)
+                .write_stdin(MODEL)
+                .assert()
+                .code(1)
+                .get_output()
+                .stderr
+                .clone();
+            String::from_utf8_lossy(&result).into_owned()
+        };
+        assert!(selected().contains("chromium-selected"));
+        script(&second, "google-chrome", "echo chrome-selected >&2; exit 4");
+        let error = selected();
+        assert!(error.contains("chrome-selected"));
+        assert!(!error.contains("chromium-selected"));
+    }
+
+    #[test]
     fn browser_options_are_literal_and_invalid_options_never_launch() {
         let dir = tempfile::tempdir().unwrap();
         let path = script(

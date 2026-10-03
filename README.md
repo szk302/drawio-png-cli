@@ -98,9 +98,10 @@ dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png \
 
 ## Chromium / Chrome の準備
 
-検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS 標準インストール先です。PATH では `chromium`、`chromium-browser`、`google-chrome`、`google-chrome-stable`、`chrome`（Windows では `chromium.exe` / `chrome.exe`）を探します。明示指定のパスが不正な場合は別候補へ切り替えません。
+既定では Chrome を使用し、Chrome が見つからない場合だけ Chromium を使います。検索順は `DIP_CHROME_PATH` → `CHROME_PATH` → PATH → OS 標準インストール先です。PATH ではまず Chrome（`google-chrome`、`google-chrome-stable`、`chrome`、Windows では `chrome.exe`）をすべてのディレクトリから探し、なければ Chromium（`chromium`、`chromium-browser`、Windows では `chromium.exe`）を探します。Linux の標準インストール先は `/usr/bin/google-chrome`、`/opt/google/chrome/chrome`、`/usr/bin/chromium` の順です。明示指定のパスが不正な場合は別候補へ切り替えません。
 
 ```sh
+# Chromium を使う場合は明示する
 export DIP_CHROME_PATH=/usr/bin/chromium
 dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 ```
@@ -212,7 +213,7 @@ DIP_TEST_DRAWIO_PATH=/path/to/drawio-or-wrapper \
 ```
 
 ```sh
-DIP_TEST_CHROME_PATH=/usr/bin/chromium \
+DIP_TEST_CHROME_PATH=/usr/bin/google-chrome \
   mise exec -- cargo test --test chromium -- --ignored --nocapture
 # テスト環境に必要な追加引数は DIP_TEST_CHROME_ARGS で指定
 python3 scripts/vendor_drawio.py --check

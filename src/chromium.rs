@@ -34,23 +34,24 @@ pub fn discover() -> Result<PathBuf> {
                 .with_context(|| format!("cannot resolve {key}"));
         }
     }
-    let names: &[&str] = if cfg!(windows) {
-        &["chromium.exe", "chrome.exe"]
+    // Chrome is the default; Chromium is used only when no Chrome is installed.
+    let groups: [&[&str]; 2] = if cfg!(windows) {
+        [&["chrome.exe"], &["chromium.exe"]]
     } else {
-        &[
-            "chromium",
-            "chromium-browser",
-            "google-chrome",
-            "google-chrome-stable",
-            "chrome",
+        [
+            &["google-chrome", "google-chrome-stable", "chrome"],
+            &["chromium", "chromium-browser"],
         ]
     };
     if let Some(path) = env::var_os("PATH") {
-        for directory in env::split_paths(&path) {
-            for name in names {
-                let candidate = directory.join(name);
-                if executable(&candidate) {
-                    return Ok(candidate.canonicalize()?);
+        let directories: Vec<_> = env::split_paths(&path).collect();
+        for names in groups {
+            for directory in &directories {
+                for name in names {
+                    let candidate = directory.join(name);
+                    if executable(&candidate) {
+                        return Ok(candidate.canonicalize()?);
+                    }
                 }
             }
         }
@@ -78,8 +79,9 @@ pub fn discover() -> Result<PathBuf> {
             }
         }
         _ => paths.extend([
-            PathBuf::from("/usr/bin/chromium"),
             PathBuf::from("/usr/bin/google-chrome"),
+            PathBuf::from("/opt/google/chrome/chrome"),
+            PathBuf::from("/usr/bin/chromium"),
         ]),
     }
     paths
