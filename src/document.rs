@@ -115,16 +115,36 @@ pub fn normalize(xml: &str) -> Result<String> {
             Ok(model[inner.root_element().range()].to_owned())
         })()
         .with_context(|| label.clone())?;
-        let text_nodes: Vec<_> = page.children().filter(|n| n.is_text()).collect();
-        let removed: usize = text_nodes.iter().map(|n| n.range().len()).sum();
+        // roxmltree merges adjacent text and CDATA into one node whose range covers
+        // only the first section. Replace everything in the page content except
+        // comments and processing instructions, whose ranges are exact.
+        let start = page.first_child().context("empty diagram")?.range().start;
+        let end = start
+            + xml[start..page.range().end]
+                .rfind("</")
+                .with_context(|| format!("{label}: missing closing tag"))?;
+        let mut gaps = Vec::new();
+        let mut cursor = start;
+        for kept in page
+            .children()
+            .filter(|n| n.is_comment() || n.is_pi())
+            .map(|n| n.range())
+            .chain(std::iter::once(end..end))
+        {
+            if cursor < kept.start {
+                gaps.push(cursor..kept.start);
+            }
+            cursor = kept.end;
+        }
+        let removed: usize = gaps.iter().map(|r| r.len()).sum();
         output_size = output_size - removed + decoded.len();
         ensure!(
             output_size <= MAX_BYTES,
             "expanded XML exceeds 64 MiB limit"
         );
-        for (index, node) in text_nodes.into_iter().enumerate() {
+        for (index, range) in gaps.into_iter().enumerate() {
             replacements.push((
-                node.range(),
+                range,
                 if index == 0 {
                     decoded.clone()
                 } else {
