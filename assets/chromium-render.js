@@ -11,8 +11,50 @@ async function dipRender(xml, bundled, mode) {
         throw Error('Math and automatic layout require local draw.io assets (DIP_DRAWIO_WEB_PATH)');
     }
     const original = mxCellRenderer.prototype.createShape;
+    // shape=stencil(...) embeds the stencil itself, so it is never a registry key.
+    // Decode it like upstream Graph.decompress, but bound the inflated size and
+    // reject broken data instead of silently drawing a default shape.
+    const utf8 = chunks => {
+        const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+        let offset = 0;
+        for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+    };
+    const stencils = new Map();
+    let stencilBytes = 0;
+    const inlineStencil = data => {
+        if (stencils.has(data)) return stencils.get(data);
+        let doc;
+        try {
+            const inflator = new pako.Inflate({raw: true});
+            const chunks = [];
+            inflator.onData = chunk => {
+                stencilBytes += chunk.length;
+                if (stencilBytes > 64 * 1024 * 1024) throw Error('exceeds 64 MiB limit');
+                chunks.push(chunk);
+            };
+            inflator.push(Uint8Array.from(atob(data), c => c.charCodeAt(0)), true);
+            if (inflator.err || !inflator.ended) throw Error(inflator.msg || 'truncated data');
+            const text = utf8(chunks);
+            doc = mxUtils.parseXml(Graph.zapGremlins(decodeURIComponent(text)));
+        } catch (error) {
+            throw Error('Invalid embedded stencil: ' + error.message);
+        }
+        if (doc.getElementsByTagName('parsererror').length || doc.documentElement.nodeName !== 'shape') {
+            throw Error('Invalid embedded stencil: expected <shape>');
+        }
+        const stencil = new mxStencil(doc.documentElement);
+        stencils.set(data, stencil);
+        return stencil;
+    };
     mxCellRenderer.prototype.createShape = function(state) {
         const name = state.style[mxConstants.STYLE_SHAPE];
+        if (typeof name === 'string' && name.startsWith('stencil(') && name.endsWith(')')) {
+            return new mxShape(inlineStencil(name.slice(8, -1)));
+        }
         if (name && !mxCellRenderer.defaultShapes[name] && !mxStencilRegistry.getStencil(name)) {
             throw Error('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
         }

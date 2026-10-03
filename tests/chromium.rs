@@ -309,6 +309,65 @@ fn real_chromium_modes_select_distinct_outputs_and_preserve_xml() {
 
 #[test]
 #[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_renders_embedded_stencils_in_all_modes() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use std::io::Write;
+    let (program, args) = browser();
+    let deflate = |text: &str| {
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(urlencoding::encode(text).as_bytes())
+            .unwrap();
+        encoder.finish().unwrap()
+    };
+    let shape = r#"<shape w="100" h="40" aspect="variable" strokewidth="inherit"><background><rect x="0" y="0" w="100" h="40"/></background><foreground><fillstroke/></foreground></shape>"#;
+    let cell = |shape: &str| {
+        format!(
+            r##"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" vertex="1" parent="1" style="{shape}fillColor=#dae8fc;strokeColor=#6c8ebf;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></root></mxGraphModel>"##
+        )
+    };
+    let stencil = |bytes: &[u8]| cell(&format!("shape=stencil({});", STANDARD.encode(bytes)));
+    let render = |xml: &str, mode| {
+        chromium::render_with_mode(
+            &program,
+            xml,
+            Duration::from_secs(60),
+            &args,
+            None,
+            false,
+            mode,
+        )
+    };
+    // The stencil draws the same rectangle as the built-in shape, offline.
+    for mode in [
+        chromium::ChromiumMode::Raw,
+        chromium::ChromiumMode::Desktop,
+        chromium::ChromiumMode::Vscode,
+    ] {
+        assert_eq!(
+            pixels(&render(&stencil(&deflate(shape)), mode).unwrap()),
+            pixels(&render(&cell(""), mode).unwrap()),
+            "{mode:?}"
+        );
+    }
+    let truncated = deflate(shape);
+    for broken in [
+        stencil(b"not deflate"),
+        stencil(&truncated[..truncated.len() / 2]),
+        stencil(&deflate("<notshape/>")),
+        cell("shape=stencil(!!!);"),
+    ] {
+        let error = format!(
+            "{:#}",
+            render(&broken, chromium::ChromiumMode::Vscode).unwrap_err()
+        );
+        assert!(error.contains("Invalid embedded stencil"), "{error}");
+    }
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
 fn real_chromium_local_assets_and_unsupported_content() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
