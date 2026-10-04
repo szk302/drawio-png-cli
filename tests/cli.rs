@@ -276,3 +276,68 @@ fn base_images_with_broken_zlib_trailers_never_replace_output() {
     }
     png_data::validate(&with_idat(|_| ())).unwrap();
 }
+
+#[test]
+fn skill_guides_match_this_dip() {
+    let core = include_str!("../assets/skill/drawio-png.md");
+    let full = include_str!("../assets/skill/drawio-png-full.md");
+    // Normalize in case a checkout converted line endings.
+    let stub = &include_str!("../skills/drawio-png/SKILL.md").replace("\r\n", "\n");
+    for (args, expected) in [(vec!["skill"], core), (vec!["skill", "--full"], full)] {
+        let output = dip()
+            .args(&args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(output).unwrap(), expected);
+    }
+    // The installed stub only points at the guides shipped with the binary.
+    assert!(stub.starts_with("---\nname: drawio-png\n"));
+    assert!(stub.contains("dip skill ") && stub.contains("dip skill --full"));
+    // Every `dip <command>` the guides mention must exist in this version.
+    let help = |args: &[&str]| {
+        let output = dip()
+            .args(args)
+            .arg("--help")
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).unwrap()
+    };
+    let commands = |help: String| -> Vec<String> {
+        help.split("Commands:")
+            .nth(1)
+            .unwrap_or("")
+            .lines()
+            .skip(1) // the rest of the "Commands:" line
+            .take_while(|line| !line.trim().is_empty())
+            .filter_map(|line| line.split_whitespace().next().map(str::to_owned))
+            .chain(["ls".to_owned()])
+            .collect()
+    };
+    let (top, library) = (commands(help(&[])), commands(help(&["library"])));
+    for text in [core, full, stub.as_str()] {
+        for mention in text.split("dip ").skip(1) {
+            let mut words = mention.split(|c: char| !c.is_ascii_alphanumeric() && c != '-');
+            let command = words.next().unwrap_or("");
+            if command.is_empty() || !command.chars().all(|c| c.is_ascii_lowercase()) {
+                continue;
+            }
+            assert!(
+                top.contains(&command.to_owned()),
+                "unknown command: dip {command}"
+            );
+            if command == "library" {
+                let sub = words.find(|w| !w.is_empty()).unwrap_or("");
+                assert!(
+                    library.contains(&sub.to_owned()),
+                    "unknown command: dip library {sub}"
+                );
+            }
+        }
+    }
+}
