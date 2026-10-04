@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
+    # Only branches: release tags run these checks from release.yml instead.
+    branches: ["**"]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read

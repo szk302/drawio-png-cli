@@ -1,0 +1,120 @@
+name: Release
+
+# Push a tag such as v0.1.0 (matching the version in Cargo.toml) to build the
+# binaries and publish them as a GitHub release. A tag with a suffix, such as
+# v0.2.0-rc.1, creates a pre-release.
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the tag matches Cargo.toml
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+  # The same checks as for branches: licenses, formatting, lints, tests and
+  # real Chromium rendering on Linux, macOS and Windows.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [version, ci]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # musl builds are static, so they run on any Linux distribution.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          # Cross-compiled on Apple silicon, so it is not run here.
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install 1.98.1 --profile minimal --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package binary with license notices
+        id: package
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/dip"
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          if [ "${{ matrix.cross }}" != true ]; then
+            "$binary" --version
+            "$binary" validate tests/fixtures/text.drawio.png
+          fi
+          mkdir -p dist
+          archive="dist/dip-${GITHUB_REF_NAME#v}-${{ matrix.target }}.${{ matrix.archive }}"
+          python scripts/package_binary.py "$binary" "$archive"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.package.outputs.archive }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum dip-* > SHA256SUMS && cat SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # A re-run replaces the assets of the existing release.
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag \
+              --title "$GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
+          fi
