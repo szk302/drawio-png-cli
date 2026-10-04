@@ -40,6 +40,28 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 
 `--base-image` は `--no-render` と組み合わせます。`--no-render` は画像と XML の見た目が同期されない旨を警告します。ベース画像を指定しない場合、既存の出力 PNG の画像は再利用しません。
 
+## カスタムライブラリの図形を追加
+
+draw.io のカスタムライブラリ（`<mxlibrary>` 形式の XML。Desktop の「File → Open Library」や VS Code 拡張の `hediet.vscode-drawio.customLibraries` で読み込むファイル）から、図形やアイコンを非圧縮の XML に追加できます。dip はライブラリを同梱・取得しません。ライブラリのファイルは利用者の環境で用意してください。
+
+```sh
+# 一覧（番号・タイトル・サイズのみ。画像データは出力しない）
+dip library list simple-icons.xml --filter postgres
+
+# 追加（追加したセルの ID を出力。入力と同じパスに保存可）
+dip extract diagram.drawio.png -o diagram.xml
+dip library add simple-icons.xml --name PostgreSQL -i diagram.xml -o diagram.xml \
+  --id db --x 40 --y 40 --width 48 --label "DB"
+dip embed -i diagram.xml -o diagram.drawio.png
+```
+
+- `--name` はタイトルの完全一致、なければ大文字小文字を区別しない一意の一致で選びます。同名が複数ある場合は `list` の番号を `--index` で指定します。
+- 追加する図形は、左上が `--x`・`--y` になるよう移動します。セルの ID は追加先のページで重ならないよう振り直し、`--id` を指定するとそれを使います（複数セルの図形の他のセルは `<ID>-<n>`）。接続線の接続先・グループの親子関係も対応付けます。
+- `--width`・`--height`（片方なら縦横比を維持）は1セルの図形、`--label` は最上位のセルが1つの図形に使えます。ラベルの位置・書式はライブラリの `style` のままです。
+- 追加先は `--page`（1から）の最初のレイヤーです。圧縮ページは展開し、追加後の XML を検証してから保存します。
+- 画像を `data:` URL で埋め込んだ図形（Simple Icons 等）は同梱資材のまま描画できます。ライブラリが外部 URL の画像を参照する場合、描画には `--allow-network` が必要です。AWS 等の draw.io 図形名（`mxgraph.*`）を使う図形には、描画時に `DIP_DRAWIO_WEB_PATH` が必要です。
+- ライブラリやアイコンのライセンス・商標の条件は、それぞれの提供元に従ってください。
+
 ## レンダラーの選択
 
 `embed --renderer auto|desktop|chromium` で選択します。既定の `auto` は Desktop を優先し、見つからない場合だけ Chromium に切り替えます。明示パスが不正な場合や描画に失敗した場合は切り替えず、既存出力を保持してエラー終了します。

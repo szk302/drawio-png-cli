@@ -3,6 +3,7 @@ mod chromium_assets;
 pub mod document;
 pub mod fonts;
 pub mod interrupt;
+pub mod library;
 pub mod png_data;
 pub mod render;
 mod resample;

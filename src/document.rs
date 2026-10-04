@@ -11,7 +11,7 @@ pub fn utf8(bytes: &[u8]) -> Result<&str> {
         .trim_start_matches('\u{feff}'))
 }
 
-fn parse(xml: &str) -> Result<Document<'_>> {
+pub(crate) fn parse(xml: &str) -> Result<Document<'_>> {
     ensure!(xml.len() <= MAX_BYTES, "XML exceeds 64 MiB limit");
     let doc = Document::parse(xml).context("invalid XML (DTD is not supported)")?;
     // roxmltree parses Rust strings without checking the declared byte encoding.

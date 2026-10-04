@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use drawio_png_cli::{chromium::ChromiumMode, document, fonts, png_data, render, storage};
+use drawio_png_cli::{chromium::ChromiumMode, document, fonts, library, png_data, render, storage};
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -64,6 +64,58 @@ enum Command {
     },
     /// Validate XML or a draw.io PNG (all pages)
     Validate { input: PathBuf },
+    /// Use shapes and icons from a draw.io custom library (<mxlibrary> file)
+    Library {
+        #[command(subcommand)]
+        command: LibraryCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum LibraryCommand {
+    /// List entries as index, title and size, without their content
+    List {
+        library: PathBuf,
+        /// Only titles containing this text (case-insensitive)
+        #[arg(long)]
+        filter: Option<String>,
+    },
+    /// Add an entry to a page of an uncompressed draw.io XML file; prints the new cell IDs
+    Add {
+        library: PathBuf,
+        /// Entry title (exact, or a unique case-insensitive match)
+        #[arg(long, required_unless_present = "index", conflicts_with = "index")]
+        name: Option<String>,
+        /// Entry index as shown by `list` (starting at 1)
+        #[arg(long)]
+        index: Option<usize>,
+        /// XML file (omit to read stdin)
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Page number, starting at 1
+        #[arg(long, default_value_t = 1)]
+        page: usize,
+        /// Left edge of the added shapes
+        #[arg(long, default_value_t = 0.0)]
+        x: f64,
+        /// Top edge of the added shapes
+        #[arg(long, default_value_t = 0.0)]
+        y: f64,
+        /// Width of a single-cell entry (keeps the aspect ratio if --height is omitted)
+        #[arg(long)]
+        width: Option<f64>,
+        /// Height of a single-cell entry (keeps the aspect ratio if --width is omitted)
+        #[arg(long)]
+        height: Option<f64>,
+        /// ID for the top-level cell; other cells get "<ID>-<n>"
+        #[arg(long)]
+        id: Option<String>,
+        /// Label of the top-level cell
+        #[arg(long)]
+        label: Option<String>,
+    },
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -140,6 +192,109 @@ fn run(cli: Cli) -> Result<()> {
                 document::utf8(&data)?.to_owned()
             };
             document::validate(&xml)?;
+        }
+        Command::Library { command } => library_command(command)?,
+    }
+    Ok(())
+}
+
+fn library_command(command: LibraryCommand) -> Result<()> {
+    match command {
+        LibraryCommand::List { library, filter } => {
+            let entries = library::parse(&storage::read(&library)?)?;
+            let filter = filter.map(|f| f.to_lowercase());
+            let mut out = String::new();
+            for (index, entry) in entries.iter().enumerate() {
+                if filter
+                    .as_ref()
+                    .is_some_and(|f| !entry.title.to_lowercase().contains(f))
+                {
+                    continue;
+                }
+                // Titles can contain line breaks; keep one entry per line.
+                let title: String = entry
+                    .title
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect();
+                out.push_str(&format!(
+                    "{}\t{title}\t{}x{}\n",
+                    index + 1,
+                    entry.width,
+                    entry.height
+                ));
+            }
+            // A consumer such as `head` may stop reading early.
+            match io::stdout().lock().write_all(out.as_bytes()) {
+                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {}
+                other => other?,
+            }
+        }
+        LibraryCommand::Add {
+            library,
+            name,
+            index,
+            input,
+            output,
+            page,
+            x,
+            y,
+            width,
+            height,
+            id,
+            label,
+        } => {
+            let entries = library::parse(&storage::read(&library)?)?;
+            let entry = match (name, index) {
+                (Some(name), _) => library::find(&entries, &name)?,
+                (None, Some(index)) => index
+                    .checked_sub(1)
+                    .and_then(|i| entries.get(i))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "library has {} entries; --index starts at 1",
+                            entries.len()
+                        )
+                    })?,
+                (None, None) => unreachable!("clap requires --name or --index"),
+            };
+            for (flag, value) in [
+                ("--x", Some(x)),
+                ("--y", Some(y)),
+                ("--width", width),
+                ("--height", height),
+            ] {
+                anyhow::ensure!(
+                    value.is_none_or(f64::is_finite),
+                    "{flag} must be a finite number"
+                );
+            }
+            for (flag, value) in [("--width", width), ("--height", height)] {
+                anyhow::ensure!(value.is_none_or(|v| v > 0.0), "{flag} must be positive");
+            }
+            let bytes = if let Some(path) = input {
+                storage::read(&path)?
+            } else {
+                storage::read_limited(io::stdin().lock())?
+            };
+            let (xml, ids) = library::add(
+                document::utf8(&bytes)?,
+                entry,
+                &library::Placement {
+                    page,
+                    x,
+                    y,
+                    width,
+                    height,
+                    id: id.as_deref(),
+                    label: label.as_deref(),
+                },
+            )?;
+            storage::atomic_write(&output, xml.as_bytes())?;
+            let mut out = io::stdout().lock();
+            for id in ids {
+                writeln!(out, "{id}")?;
+            }
         }
     }
     Ok(())
