@@ -1,0 +1,25 @@
+{
+  "revision": "96a916a337d13fc8bf622c8a67d422bd284eabe5",
+  "assets": [
+    {
+      "source": "src/main/webapp/js/viewer.min.js",
+      "file": "js_viewer.min.js.gz",
+      "sha256": "cdff7b8e8207b3c0a1ee352ce7a1df1b9095164cd26c92b324054603d9b5c9c7"
+    },
+    {
+      "source": "src/main/webapp/js/export-init.js",
+      "file": "js_export-init.js.gz",
+      "sha256": "0c17d2ee02bee08f5c41f418165f4d69a637a41f657093ce52fe0bec80568169"
+    },
+    {
+      "source": "src/main/webapp/js/export.js",
+      "file": "js_export.js.gz",
+      "sha256": "5979eb824584e56ba42de54293c6eefbe6fc13f32793f06aa8bc30603dc3e252"
+    },
+    {
+      "source": "src/main/webapp/mxgraph/css/common.css",
+      "file": "mxgraph_css_common.css.gz",
+      "sha256": "ec6f1ce9d6bfdd2b6487d38ef3d2e0769969f8104ecf66219c9473c02abe3c25"
+    }
+  ]
+}

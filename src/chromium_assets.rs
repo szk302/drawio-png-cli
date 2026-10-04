@@ -12,6 +12,7 @@ use std::{
 };
 use tiny_http::{Header, Method, Response, Server};
 
+/// draw.io 31.4.5, matching the Desktop reference for the raw and desktop modes.
 pub(crate) const ASSETS: &[(&str, &[u8])] = &[
     (
         "js/viewer.min.js",
@@ -31,9 +32,35 @@ pub(crate) const ASSETS: &[(&str, &[u8])] = &[
     ),
 ];
 
+/// draw.io 26.0.2, pinned by the stable VS Code extension 1.9.0, for the vscode mode.
+pub(crate) const VSCODE_ASSETS: &[(&str, &[u8])] = &[
+    (
+        "js/viewer.min.js",
+        include_bytes!("../assets/drawio/vscode/js_viewer.min.js.gz"),
+    ),
+    (
+        "js/export-init.js",
+        include_bytes!("../assets/drawio/vscode/js_export-init.js.gz"),
+    ),
+    (
+        "js/export.js",
+        include_bytes!("../assets/drawio/vscode/js_export.js.gz"),
+    ),
+    (
+        "mxgraph/css/common.css",
+        include_bytes!("../assets/drawio/vscode/mxgraph_css_common.css.gz"),
+    ),
+];
+
+/// Shape and stencil bundles the VS Code extension loads up front. draw.io
+/// releases without a `shapes/` directory cannot load these shapes on demand.
+const VSCODE_PRELOAD: &[&str] = &["js/shapes-14-6-5.min.js", "js/stencils.min.js"];
+
 pub(crate) struct AssetServer {
     pub(crate) origin: String,
     pub(crate) bundled: bool,
+    /// Scripts from the local web root to load before rendering.
+    pub(crate) preload: Vec<&'static str>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
 }
@@ -58,7 +85,7 @@ fn local_file(root: &Path, url: &str) -> Result<PathBuf> {
 }
 
 impl AssetServer {
-    pub(crate) fn start(root: Option<PathBuf>, allow_network: bool) -> Result<Self> {
+    pub(crate) fn start(root: Option<PathBuf>, allow_network: bool, vscode: bool) -> Result<Self> {
         let root = root
             .map(|p| p.canonicalize().context("invalid DIP_DRAWIO_WEB_PATH"))
             .transpose()?;
@@ -69,9 +96,17 @@ impl AssetServer {
             );
         }
         let bundled = root.is_none();
+        let preload = match &root {
+            Some(root) if vscode => VSCODE_PRELOAD
+                .iter()
+                .copied()
+                .filter(|name| root.join(name).is_file())
+                .collect(),
+            _ => Vec::new(),
+        };
         let mut assets = HashMap::new();
         if bundled {
-            for &(name, bytes) in ASSETS {
+            for &(name, bytes) in if vscode { VSCODE_ASSETS } else { ASSETS } {
                 let bytes = storage::read_limited(flate2::read::GzDecoder::new(bytes))?;
                 assets.insert(format!("/{name}"), bytes);
             }
@@ -132,6 +167,7 @@ impl AssetServer {
         Ok(Self {
             origin,
             bundled,
+            preload,
             stop,
             worker: Some(worker),
         })
@@ -186,7 +222,7 @@ mod tests {
         let alias = temp.path().join("alias");
         symlink(&root, &alias).unwrap();
 
-        let server = AssetServer::start(Some(alias), false).unwrap();
+        let server = AssetServer::start(Some(alias), false, false).unwrap();
         let address = server.origin.strip_prefix("http://").unwrap();
         for (path, status, body) in [
             ("/ok.js", "200 OK", "ok"),

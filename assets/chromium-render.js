@@ -1,6 +1,28 @@
 // Called with JSON arguments through CDP, never XML interpolated as source code.
-async function dipRender(xml, bundled, mode) {
+async function dipRender(xml, bundled, mode, preload) {
     if (bundled) mxStencilRegistry.dynamicLoading = false;
+    // Load the shape bundles the VS Code extension includes, in its order.
+    for (const src of preload) {
+        await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = () => reject(Error('Unable to load ' + src));
+            document.head.appendChild(script);
+        });
+    }
+    // shapes-14-6-5.min.js already defines every shapes/*.js library, and the
+    // extension's draw.io has no shapes/ directory to load them from. Stencil XML
+    // still loads on demand; stencils.min.js serves it from its embedded copies.
+    if (preload.includes('js/shapes-14-6-5.min.js')) {
+        for (const files of Object.values(mxStencilRegistry.libraries)) {
+            for (const file of [].concat(files)) {
+                if (typeof file === 'string' && file.startsWith(SHAPES_PATH + '/') && file.endsWith('.js')) {
+                    mxStencilRegistry.setFileLoaded(file);
+                }
+            }
+        }
+    }
     const doc = mxUtils.parseXml(xml);
     if (doc.getElementsByTagName('parsererror').length) throw Error('Invalid XML');
     const model = doc.documentElement.nodeName === 'mxGraphModel'
@@ -96,7 +118,8 @@ async function dipRender(xml, bundled, mode) {
     const page = model.parentNode;
     const getGlobalVariable = graph.getGlobalVariable;
     graph.getGlobalVariable = function(name) {
-        if (name === 'page') return page.nodeName === 'diagram' ? page.getAttribute('name') : '';
+        // The extension wraps a bare mxGraphModel in a new page named Page-1 (English UI).
+        if (name === 'page') return page.nodeName === 'diagram' ? page.getAttribute('name') : 'Page-1';
         if (name === 'pagenumber') return 1;
         // EditorUi normally supplies this; count pages before the first is separated.
         if (name === 'pagecount') return file.nodeName === 'mxfile'
