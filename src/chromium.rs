@@ -229,6 +229,8 @@ pub fn render_with_mode(
     allow_network: bool,
     mode: ChromiumMode,
 ) -> Result<Vec<u8>> {
+    // Declared first so it is dropped after the browser and its profile.
+    let _interrupt = crate::interrupt::Guard::new();
     ensure!(xml.len() <= MAX_BYTES, "XML exceeds 64 MiB limit");
     let deadline = Instant::now() + timeout;
     let profile = tempfile::Builder::new().prefix("dip-chromium-").tempdir()?;
@@ -461,6 +463,7 @@ fn capture(cdp: &mut Cdp, mode: ChromiumMode, deadline: Instant) -> Result<Vec<u
 }
 
 fn remaining(deadline: Instant) -> Result<Duration> {
+    crate::interrupt::check()?;
     deadline
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
@@ -502,7 +505,11 @@ impl Cdp {
             ))?;
             let message = match self.socket.read() {
                 Err(tungstenite::Error::Io(e))
-                    if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
+                    // Signals interrupt reads with a timeout even with SA_RESTART.
+                    if matches!(
+                        e.kind(),
+                        ErrorKind::TimedOut | ErrorKind::WouldBlock | ErrorKind::Interrupted
+                    ) =>
                 {
                     remaining(self.deadline)
                         .with_context(|| format!("Chromium timed out during {method}"))?;

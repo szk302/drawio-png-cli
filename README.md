@@ -36,7 +36,7 @@ dip embed -i diagram.xml --no-render -b diagram.drawio.png -o diagram.drawio.png
 dip embed -i diagram.xml --no-render -o new.drawio.png
 ```
 
-`extract` の `-o` を省略すると XML を stdout に出力します。診断・警告は stderr に出力します。正常終了は `0`、処理・検証エラーは `1`、引数エラーは `2` です。
+`extract` の `-o` を省略すると XML を stdout に出力します。診断・警告は stderr に出力します。正常終了は `0`、処理・検証エラーは `1`、引数エラーは `2` です。描画中に SIGINT（Ctrl+C）・SIGTERM・SIGHUP（Windows では Ctrl+C・Ctrl+Break）を受けると、描画を中断してレンダラーのプロセスと一時ファイルを片付け、既存出力を変更せずにそのシグナルで終了します（シェルでの終了コードは `128 + シグナル番号`、SIGINT なら `130`）。描画以外の処理中は通常どおり直ちに終了し、`nohup` などで無視されているシグナルは無視したままです。SIGKILL などの強制終了では片付けられません。
 
 `--base-image` は `--no-render` と組み合わせます。`--no-render` は画像と XML の見た目が同期されない旨を警告します。ベース画像を指定しない場合、既存の出力 PNG の画像は再利用しません。
 

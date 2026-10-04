@@ -910,4 +910,141 @@ wait
         let profile = fs::read_to_string(dir.path().join("profile")).unwrap();
         assert!(!PathBuf::from(profile.trim()).exists());
     }
+
+    #[test]
+    fn termination_signals_stop_the_renderer_and_remove_its_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = script(
+            dir.path(),
+            "chromium",
+            r#"
+for arg in "$@"; do case "$arg" in --user-data-dir=*) echo "${arg#--user-data-dir=}" > "$(dirname "$0")/profile";; esac; done
+(sleep 1; touch "$(dirname "$0")/escaped") &
+wait
+"#,
+        );
+        let output = dir.path().join("out.png");
+        fs::write(dir.path().join("in.xml"), MODEL).unwrap();
+        for signal in [libc::SIGTERM, libc::SIGINT] {
+            fs::write(&output, b"original").unwrap();
+            let _ = fs::remove_file(dir.path().join("profile"));
+            let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_dip"))
+                .env("DIP_CHROME_PATH", &path)
+                .env_remove("DIP_CHROME_ARGS")
+                .env_remove("DIP_CHROMIUM_MODE")
+                .env_remove("DIP_DRAWIO_WEB_PATH")
+                .args(["embed", "--renderer", "chromium", "-i"])
+                .arg(dir.path().join("in.xml"))
+                .arg("-o")
+                .arg(&output)
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            // Wait until the fake browser has started.
+            let start = Instant::now();
+            while !dir.path().join("profile").exists() {
+                assert!(start.elapsed() < Duration::from_secs(10));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            unsafe { libc::kill(child.id() as i32, signal) };
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(
+                    start.elapsed() < Duration::from_secs(10),
+                    "dip did not exit"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            };
+            let mut stderr = String::new();
+            std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+            // dip cleans up, then ends with the signal itself (130/143 in a shell).
+            assert_eq!(
+                std::os::unix::process::ExitStatusExt::signal(&status),
+                Some(signal),
+                "{stderr}"
+            );
+            assert!(stderr.contains("interrupted"), "{stderr}");
+            assert_eq!(fs::read(&output).unwrap(), b"original");
+            let profile = fs::read_to_string(dir.path().join("profile")).unwrap();
+            assert!(!PathBuf::from(profile.trim()).exists());
+            std::thread::sleep(Duration::from_millis(1200));
+            assert!(!dir.path().join("escaped").exists());
+        }
+    }
+
+    #[test]
+    fn signals_outside_rendering_keep_their_default_behavior() {
+        // While dip waits for stdin, a signal must stop it before it saves.
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("out.png");
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            fs::write(&output, b"original").unwrap();
+            let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_dip"))
+                .args(["embed", "--no-render", "-o"])
+                .arg(&output)
+                .stdin(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            unsafe { libc::kill(child.id() as i32, signal) };
+            let start = Instant::now();
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                if start.elapsed() > Duration::from_secs(2) {
+                    // Still waiting: completing the input must not save either.
+                    use std::io::Write;
+                    let mut stdin = child.stdin.take().unwrap();
+                    let _ = stdin.write_all(MODEL.as_bytes());
+                    drop(stdin);
+                    let _ = child.wait();
+                    panic!("dip ignored signal {signal}");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            };
+            assert_eq!(
+                std::os::unix::process::ExitStatusExt::signal(&status),
+                Some(signal)
+            );
+            assert_eq!(fs::read(&output).unwrap(), b"original");
+        }
+    }
+
+    #[test]
+    fn ignored_signals_stay_ignored_while_rendering() {
+        // nohup ignores SIGHUP; dip must not turn it into an interruption.
+        let dir = tempfile::tempdir().unwrap();
+        let path = script(dir.path(), "chromium", "sleep 1; exit 3");
+        fs::write(dir.path().join("in.xml"), MODEL).unwrap();
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_dip"));
+        command
+            .env("DIP_CHROME_PATH", &path)
+            .env_remove("DIP_CHROME_ARGS")
+            .env_remove("DIP_CHROMIUM_MODE")
+            .env_remove("DIP_DRAWIO_WEB_PATH")
+            .args(["embed", "--renderer", "chromium", "-i"])
+            .arg(dir.path().join("in.xml"))
+            .arg("-o")
+            .arg(dir.path().join("out.png"))
+            .stderr(std::process::Stdio::piped());
+        unsafe {
+            std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+                libc::signal(libc::SIGHUP, libc::SIG_IGN);
+                Ok(())
+            });
+        }
+        let child = command.spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        unsafe { libc::kill(child.id() as i32, libc::SIGHUP) };
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // The fake browser exits before startup, so dip reports that instead.
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains("exited before startup"), "{stderr}");
+        assert!(!stderr.contains("interrupted"), "{stderr}");
+    }
 }
