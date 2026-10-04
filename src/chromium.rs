@@ -229,6 +229,8 @@ pub fn render_with_mode(
     allow_network: bool,
     mode: ChromiumMode,
 ) -> Result<Vec<u8>> {
+    // Declared first so it is dropped after the browser and its profile.
+    let _interrupt = crate::interrupt::Guard::new();
     ensure!(xml.len() <= MAX_BYTES, "XML exceeds 64 MiB limit");
     let deadline = Instant::now() + timeout;
     let profile = tempfile::Builder::new().prefix("dip-chromium-").tempdir()?;

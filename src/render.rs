@@ -194,6 +194,8 @@ fn render_with_args(
     timeout: Duration,
     args: &[String],
 ) -> Result<Vec<u8>> {
+    // Declared first so it is dropped after Desktop and its temporary directory.
+    let _interrupt = crate::interrupt::Guard::new();
     let directory = tempfile::Builder::new().prefix("dip-render-").tempdir()?;
     let input = directory.path().join("input.drawio");
     let output = directory.path().join("output.png");
