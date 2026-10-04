@@ -91,14 +91,16 @@ pub struct Library {
 pub fn open(path: &Path) -> Result<Library> {
     let (title, entries) = parse_library(&storage::read(path)?)
         .with_context(|| format!("invalid library {}", path.display()))?;
-    let file = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let name = match file.len().checked_sub(4) {
-        Some(end) if file[end..].eq_ignore_ascii_case(".xml") => file[..end].to_owned(),
-        _ => file,
-    };
+    let xml = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("xml"));
+    let name = if xml {
+        path.file_stem()
+    } else {
+        path.file_name()
+    }
+    .map(|n| n.to_string_lossy().into_owned())
+    .unwrap_or_default();
     Ok(Library {
         name,
         title,
@@ -520,12 +522,16 @@ impl Edit<'_, '_, '_, '_> {
                     "source" | "target" if is_inner => {
                         Some(self.ids.get(value).cloned().unwrap_or_default())
                     }
-                    "value" if is_cell && cell.has_tag_name("mxCell") => {
+                    // Only the top-level cell is relabelled; a group's
+                    // children keep their own labels.
+                    "value" if top && is_cell && cell.has_tag_name("mxCell") => {
                         self.placement.label.map(str::to_owned)
                     }
-                    "label" if is_cell && !cell.has_tag_name("mxCell") => {
+                    "label" if top && is_cell && !cell.has_tag_name("mxCell") => {
                         self.placement.label.map(str::to_owned)
                     }
+                    // Edges name the port cells they attach to in their style.
+                    "style" if is_inner => remap_ports(value, self.ids),
                     _ => None,
                 }
             },
@@ -640,6 +646,24 @@ impl Edit<'_, '_, '_, '_> {
             _ => None,
         }
     }
+}
+
+/// Rewrites `sourcePort`/`targetPort` style values that name cells of the entry.
+fn remap_ports(style: &str, ids: &HashMap<String, String>) -> Option<String> {
+    let mut changed = false;
+    let items: Vec<String> = style
+        .split(';')
+        .map(|item| {
+            if let Some((key @ ("sourcePort" | "targetPort"), port)) = item.split_once('=')
+                && let Some(id) = ids.get(port)
+            {
+                changed = true;
+                return format!("{key}={id}");
+            }
+            item.to_owned()
+        })
+        .collect();
+    changed.then(|| items.join(";"))
 }
 
 fn format_number(value: f64) -> String {

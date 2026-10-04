@@ -84,10 +84,10 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         page: usize,
         /// Left edge of the inserted shapes
-        #[arg(long, default_value_t = 0.0)]
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
         x: f64,
         /// Top edge of the inserted shapes
-        #[arg(long, default_value_t = 0.0)]
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
         y: f64,
         /// Width of a single-cell entry (keeps the aspect ratio if --height is omitted)
         #[arg(long)]

@@ -44,6 +44,25 @@ fn library_xml() -> String {
     format!("<mxlibrary title=\"test\">{text}</mxlibrary>")
 }
 
+/// A library of the given entries, escaped as draw.io writes it.
+fn library_of(entries: serde_json::Value) -> String {
+    let text = entries
+        .to_string()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!("<mxlibrary>{text}</mxlibrary>")
+}
+
+fn library_named(name: &str, entries: serde_json::Value) -> Vec<library::Library> {
+    vec![library::Library {
+        name: name.into(),
+        title: None,
+        path: "lib.xml".into(),
+        entries: library::parse(library_of(entries).as_bytes()).unwrap(),
+    }]
+}
+
 fn entries() -> Vec<library::Library> {
     vec![library::Library {
         name: "test".into(),
@@ -477,4 +496,143 @@ fn library_files_and_names_are_required() {
         .args(["library", "list"])
         .assert()
         .code(1);
+}
+
+#[test]
+fn label_changes_only_the_top_level_cell() {
+    // One top-level group whose children keep their own labels.
+    let group = r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="g" value="Group" style="group" vertex="1" connectable="0" parent="1"><mxGeometry width="100" height="40" as="geometry"/></mxCell><mxCell id="a" value="Child A" vertex="1" parent="g"><mxGeometry width="40" height="40" as="geometry"/></mxCell><object id="b" label="Child B"><mxCell vertex="1" parent="g"><mxGeometry x="50" width="40" height="40" as="geometry"/></mxCell></object><mxCell id="c" vertex="1" parent="g"><mxGeometry x="90" width="10" height="10" as="geometry"/></mxCell></root></mxGraphModel>"#;
+    let libraries = library_named(
+        "g",
+        serde_json::json!([{"xml": group, "w": 100, "h": 40, "title": "G"}]),
+    );
+    let mut options = placement(0.0, 0.0);
+    options.id = Some("new-group");
+    options.label = Some("New Group");
+    let (xml, ids) =
+        library::insert(MODEL, library::find(&libraries, "G").unwrap().1, &options).unwrap();
+    document::validate(&xml).unwrap();
+    assert_eq!(
+        ids,
+        ["new-group", "new-group-1", "new-group-2", "new-group-3"]
+    );
+    let doc = roxmltree::Document::parse(&xml).unwrap();
+    assert_eq!(
+        cell(&doc, "new-group").attribute("value"),
+        Some("New Group")
+    );
+    assert_eq!(
+        cell(&doc, "new-group-1").attribute("value"),
+        Some("Child A")
+    );
+    assert_eq!(
+        cell(&doc, "new-group-2").attribute("label"),
+        Some("Child B")
+    );
+    // A child without a label does not get one.
+    assert_eq!(cell(&doc, "new-group-3").attribute("value"), None);
+}
+
+#[test]
+fn edge_ports_follow_the_new_cell_ids() {
+    let ports = r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="v" vertex="1" parent="1"><mxGeometry width="100" height="40" as="geometry"/></mxCell><mxCell id="p" style="port" vertex="1" parent="v"><mxGeometry x="1" y="0.5" width="4" height="4" relative="1" as="geometry"/></mxCell><mxCell id="w" vertex="1" parent="1"><mxGeometry x="200" width="100" height="40" as="geometry"/></mxCell><mxCell id="q" style="port" vertex="1" parent="w"><mxGeometry y="0.5" width="4" height="4" relative="1" as="geometry"/></mxCell><mxCell id="e" style="sourcePort=p;targetPort=q;endArrow=none;entryX=0;" edge="1" parent="1" source="v" target="w"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel>"#;
+    let libraries = library_named(
+        "p",
+        serde_json::json!([{"xml": ports, "w": 300, "h": 40, "title": "P"}]),
+    );
+    let (xml, ids) = library::insert(
+        MODEL,
+        library::find(&libraries, "P").unwrap().1,
+        &placement(0.0, 0.0),
+    )
+    .unwrap();
+    document::validate(&xml).unwrap();
+    let doc = roxmltree::Document::parse(&xml).unwrap();
+    let id = |old: &str| {
+        // Cells keep their order, so map by position in the entry.
+        let order = ["v", "p", "w", "q", "e"];
+        let mut sorted = ids.clone();
+        sorted.sort_by_key(|i| i.trim_start_matches("lib-").parse::<u32>().unwrap());
+        sorted[order.iter().position(|o| *o == old).unwrap()].clone()
+    };
+    let edge = cell(&doc, &id("e"));
+    assert_eq!(
+        edge.attribute("style"),
+        Some(
+            format!(
+                "sourcePort={};targetPort={};endArrow=none;entryX=0;",
+                id("p"),
+                id("q")
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(edge.attribute("source"), Some(id("v").as_str()));
+    // Styles without ports, and ports outside the entry, stay as they are.
+    let other = r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="e" style="sourcePort=elsewhere;rounded=1" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1" y="2" as="sourcePoint"/><mxPoint x="3" y="4" as="targetPoint"/></mxGeometry></mxCell></root></mxGraphModel>"#;
+    let libraries = library_named(
+        "o",
+        serde_json::json!([{"xml": other, "w": 2, "h": 2, "title": "O"}]),
+    );
+    let (xml, ids) = library::insert(
+        MODEL,
+        library::find(&libraries, "O").unwrap().1,
+        &placement(0.0, 0.0),
+    )
+    .unwrap();
+    let doc = roxmltree::Document::parse(&xml).unwrap();
+    assert_eq!(
+        cell(&doc, &ids[0]).attribute("style"),
+        Some("sourcePort=elsewhere;rounded=1")
+    );
+}
+
+#[test]
+fn library_names_come_from_unicode_file_names_and_positions_can_be_negative() {
+    let dir = tempdir().unwrap();
+    let text = library_of(
+        serde_json::json!([{"xml": compress(ICON), "w": 144, "h": 72, "title": "Icon A"}]),
+    );
+    // A non-ASCII name without .xml must not be cut inside a character.
+    for (file, name) in [
+        ("図形集", "図形集"),
+        ("図形集.xml", "図形集"),
+        ("形.XML", "形"),
+    ] {
+        let path = dir.path().join(file);
+        fs::write(&path, &text).unwrap();
+        let output = dip()
+            .args(["library", "list", "--library-file"])
+            .arg(&path)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            format!("{name}\t1\t-\n"),
+            "{file}"
+        );
+    }
+    // Negative coordinates work as separate values.
+    let output = dir.path().join("out.xml");
+    dip()
+        .arg("insert")
+        .arg("--library-file")
+        .arg(dir.path().join("図形集.xml"))
+        .args([
+            "--name", "Icon A", "--id", "neg", "--x", "-10", "--y", "-20.5", "-o",
+        ])
+        .arg(&output)
+        .write_stdin(MODEL)
+        .assert()
+        .success();
+    let xml = fs::read_to_string(&output).unwrap();
+    let doc = roxmltree::Document::parse(&xml).unwrap();
+    let g = geometry(cell(&doc, "neg"));
+    assert_eq!(
+        (g.attribute("x"), g.attribute("y")),
+        (Some("-10"), Some("-20.5"))
+    );
 }
