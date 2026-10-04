@@ -40,6 +40,42 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 
 `--base-image` は `--no-render` と組み合わせます。`--no-render` は画像と XML の見た目が同期されない旨を警告します。ベース画像を指定しない場合、既存の出力 PNG の画像は再利用しません。
 
+## カスタムライブラリの図形を挿入
+
+draw.io のカスタムライブラリ（`<mxlibrary>` 形式の XML。Desktop の「File → Open Library」や VS Code 拡張の `hediet.vscode-drawio.customLibraries` で読み込むファイル）の図形・アイコン（エントリー）を、非圧縮の XML に挿入できます。dip はライブラリを同梱・取得しません。ライブラリのファイルは利用者の環境で用意し、`DIP_LIBRARY_PATH` で指定します。
+
+`DIP_LIBRARY_PATH` には、ファイルまたはディレクトリを `PATH` と同じ区切り（Linux・macOS は `:`、Windows は `;`）で指定します。ディレクトリは直下の `*.xml` を名前順に読み、読めないファイルは警告を出して読み飛ばします。ライブラリ名はファイル名から `.xml` を除いたものです。`--library-file` を指定すると、`DIP_LIBRARY_PATH` の代わりにそのファイルだけを使います。
+
+```sh
+export DIP_LIBRARY_PATH="$HOME/.cache/drawio-libraries"
+
+# ライブラリの一覧（ライブラリ名・エントリー数・表示名）。ls でも可
+dip library list
+#   simple-icons	3463	Simple Icons
+
+# 1つのライブラリの詳細
+dip library show simple-icons
+
+# エントリーの検索（ライブラリ名・番号・タイトル・サイズ。画像データは出力しない）
+dip library search postgres
+#   simple-icons	2332	PostgreSQL	144x144
+dip library search --library simple-icons   # 1つのライブラリの全エントリー
+
+# 図面への挿入（挿入したセルの ID を出力。入力と同じパスに保存可）
+dip extract diagram.drawio.png -o diagram.xml
+dip insert --name PostgreSQL -i diagram.xml -o diagram.xml --id db --x 40 --y 40 --width 48 --label "DB"
+dip embed -i diagram.xml -o diagram.drawio.png
+```
+
+- `dip library` の各コマンドはライブラリを調べるだけで、ファイルを変更しません。図面を変更するのは `dip insert` です。
+- 検索語はタイトルに含まれる文字列で、大文字小文字を区別しません。省略すると全エントリーを出力します。
+- `--name` はタイトルの完全一致、なければ大文字小文字を区別しない一意の一致で選びます。複数のライブラリにある場合は `--library` を、同じライブラリに同名が複数ある場合は `search` の番号を `--index`（ライブラリが1つに決まるときのみ）で指定します。
+- 挿入する図形は、左上が `--x`・`--y` になるよう移動します。セルの ID は挿入先のページで重ならないよう振り直し、`--id` を指定するとそれを使います（複数セルの図形の他のセルは `<ID>-<n>`）。接続線の接続先・グループの親子関係も対応付けます。
+- `--width`・`--height`（片方なら縦横比を維持）は1セルの図形、`--label` は最上位のセルが1つの図形に使えます。ラベルの位置・書式はライブラリの `style` のままです。
+- 挿入先は `--page`（1から）の最初のレイヤーです。圧縮ページは展開し、挿入後の XML を検証してから保存します。
+- 画像を `data:` URL で埋め込んだ図形（Simple Icons 等）は同梱資材のまま描画できます。ライブラリが外部 URL の画像を参照する場合、描画には `--allow-network` が必要です。AWS 等の draw.io 図形名（`mxgraph.*`）を使う図形には、描画時に `DIP_DRAWIO_WEB_PATH` が必要です。
+- ライブラリやアイコンのライセンス・商標の条件は、それぞれの提供元に従ってください。
+
 ## レンダラーの選択
 
 `embed --renderer auto|desktop|chromium` で選択します。既定の `auto` は Desktop を優先し、見つからない場合だけ Chromium に切り替えます。明示パスが不正な場合や描画に失敗した場合は切り替えず、既存出力を保持してエラー終了します。
