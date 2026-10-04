@@ -67,7 +67,10 @@ async function dipRender(xml, bundled, mode) {
         if (typeof name === 'string' && name.startsWith('stencil(') && name.endsWith(')')) {
             return new mxShape(inlineStencil(name.slice(8, -1)));
         }
-        if (name && !mxCellRenderer.defaultShapes[name] && !mxStencilRegistry.getStencil(name)) {
+        // getStencil can load a shape library (e.g. shapes/mxAWS4.js) that registers
+        // a shape class rather than a stencil, so check the registry again after it.
+        if (name && !mxCellRenderer.defaultShapes[name] && !mxStencilRegistry.getStencil(name) &&
+            !mxCellRenderer.defaultShapes[name]) {
             throw Error('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
         }
         return original.apply(this, arguments);

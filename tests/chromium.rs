@@ -475,6 +475,28 @@ fn real_chromium_local_assets_and_unsupported_content() {
         pixels(&render(MODEL, Some(root.to_owned()), false).unwrap()),
         pixels(&render(MODEL, None, false).unwrap())
     );
+    // Shape libraries load on demand from local assets and register shape
+    // classes, not stencils. A stand-in library keeps the test self-contained.
+    let aws = MODEL.replace(
+        "vertex=\"1\"",
+        "vertex=\"1\" style=\"shape=mxgraph.aws4.resourceIcon;\"",
+    );
+    assert!(render(&aws, Some(root.to_owned()), false).is_err());
+    for (name, data) in [
+        (
+            "shapes/mxAWS4.js",
+            "mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', mxRectangleShape);",
+        ),
+        ("stencils/aws4.xml", "<shapes name=\"mxgraph.aws4\"/>"),
+    ] {
+        fs::create_dir_all(root.join(name).parent().unwrap()).unwrap();
+        fs::write(root.join(name), data).unwrap();
+    }
+    assert_eq!(
+        pixels(&render(&aws, Some(root.to_owned()), false).unwrap()),
+        pixels(&render(MODEL, None, false).unwrap())
+    );
+    assert!(format!("{:#}", render(&aws, None, false).unwrap_err()).contains("Unsupported shape"));
     fs::remove_file(root.join("js/viewer.min.js")).unwrap();
     assert!(
         render(MODEL, Some(root.to_owned()), false)
