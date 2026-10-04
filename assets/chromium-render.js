@@ -84,6 +84,18 @@ async function dipRender(xml, bundled, mode, preload) {
         }
         return drawNode.apply(this, arguments);
     };
+    // Shapes such as mxgraph.aws4.resourceIcon look up their icon (resIcon, grIcon)
+    // while painting and silently omit it when it is missing. Record every named
+    // lookup that finds neither a stencil nor a shape class; dip fails on these.
+    const getStencil = mxStencilRegistry.getStencil;
+    mxStencilRegistry.getStencil = function(name) {
+        const stencil = getStencil.apply(this, arguments);
+        if (stencil == null && typeof name === 'string' && name.trim() !== '' &&
+            !mxCellRenderer.defaultShapes[name]) {
+            window.dipErrors.push('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
+        }
+        return stencil;
+    };
     mxCellRenderer.prototype.createShape = function(state) {
         const name = state.style[mxConstants.STYLE_SHAPE];
         if (typeof name === 'string' && name.startsWith('stencil(') && name.endsWith(')')) {
@@ -153,6 +165,7 @@ async function dipRender(xml, bundled, mode, preload) {
             // Resolve URLs directly; do not send images to draw.io's public proxy.
             null, null, scale, null, null, new mxUrlConverter(), graph, border);
     });
+    if (window.dipErrors.length) throw Error(window.dipErrors.join('; '));
     checkSize(canvas.width, canvas.height);
     const uri = canvas.toDataURL('image/png');
     if (!uri.startsWith('data:image/png;base64,')) throw Error('Canvas returned no PNG');

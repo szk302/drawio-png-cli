@@ -476,13 +476,21 @@ fn vscode_web_root(root: &std::path::Path) {
 fn real_chromium_vscode_preloads_extension_shape_bundles() {
     // draw.io 26.0.2 has no shapes/ directory; the extension preloads these
     // bundles instead. Stand-ins keep the test self-contained: the shapes bundle
-    // registers a shape class, and the stencils bundle serves stencil XML.
+    // registers a shape class that, like the AWS shapes, looks up its resIcon
+    // stencil while painting, and the stencils bundle serves stencil XML.
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     vscode_web_root(root);
     fs::write(
         root.join("js/shapes-14-6-5.min.js"),
-        "mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', mxRectangleShape);",
+        r#"function DipIcon() { mxRectangleShape.call(this); }
+mxUtils.extend(DipIcon, mxRectangleShape);
+DipIcon.prototype.paintVertexShape = function(c, x, y, w, h) {
+  mxRectangleShape.prototype.paintVertexShape.apply(this, arguments);
+  var icon = mxStencilRegistry.getStencil(mxUtils.getValue(this.style, 'resIcon', null));
+  if (icon != null) icon.drawShape(c, this, x, y, w, h);
+};
+mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', DipIcon);"#,
     )
     .unwrap();
     fs::write(
@@ -506,6 +514,7 @@ mxStencilRegistry.loadStencil = function(filename, fn) {
     for style in [
         "shape=mxgraph.aws4.resourceIcon;",
         "shape=mxgraph.aws4.box;",
+        "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.box;",
     ] {
         assert_eq!(
             pixels(&render(&cell(style), Some(root.to_owned()), false).unwrap()),
@@ -513,6 +522,16 @@ mxStencilRegistry.loadStencil = function(filename, fn) {
             "{style}"
         );
     }
+    // Upstream shapes omit an icon they cannot find; dip must not save that image.
+    let missing = cell("shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.missing_icon;");
+    let error = format!(
+        "{:#}",
+        render(&missing, Some(root.to_owned()), false).unwrap_err()
+    );
+    assert!(
+        error.contains("Unsupported shape: mxgraph.aws4.missing_icon"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -535,7 +554,14 @@ fn real_chromium_local_assets_and_unsupported_content() {
     for (name, data) in [
         (
             "shapes/mxAWS4.js",
-            "mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', mxRectangleShape);",
+            r#"function DipIcon() { mxRectangleShape.call(this); }
+mxUtils.extend(DipIcon, mxRectangleShape);
+DipIcon.prototype.paintVertexShape = function(c, x, y, w, h) {
+  mxRectangleShape.prototype.paintVertexShape.apply(this, arguments);
+  var icon = mxStencilRegistry.getStencil(mxUtils.getValue(this.style, 'resIcon', null));
+  if (icon != null) icon.drawShape(c, this, x, y, w, h);
+};
+mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', DipIcon);"#,
         ),
         ("stencils/aws4.xml", "<shapes name=\"mxgraph.aws4\"/>"),
     ] {
