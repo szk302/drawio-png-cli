@@ -23,6 +23,7 @@ pub(crate) fn capture_size(width: u32, height: u32) -> Result<usize> {
 }
 
 fn check_deadline(deadline: Instant) -> Result<()> {
+    crate::interrupt::check()?;
     ensure!(
         Instant::now() < deadline,
         "Chromium rendering timed out during resizing"

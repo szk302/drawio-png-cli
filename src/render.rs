@@ -228,6 +228,7 @@ fn render_with_args(
     };
     let deadline = Instant::now() + timeout;
     loop {
+        crate::interrupt::check()?;
         if let Some(status) = child.child.try_wait()? {
             child.finished = true;
             ensure!(

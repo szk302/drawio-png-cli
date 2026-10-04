@@ -461,6 +461,7 @@ fn capture(cdp: &mut Cdp, mode: ChromiumMode, deadline: Instant) -> Result<Vec<u
 }
 
 fn remaining(deadline: Instant) -> Result<Duration> {
+    crate::interrupt::check()?;
     deadline
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
@@ -502,7 +503,11 @@ impl Cdp {
             ))?;
             let message = match self.socket.read() {
                 Err(tungstenite::Error::Io(e))
-                    if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
+                    // Signals interrupt reads with a timeout even with SA_RESTART.
+                    if matches!(
+                        e.kind(),
+                        ErrorKind::TimedOut | ErrorKind::WouldBlock | ErrorKind::Interrupted
+                    ) =>
                 {
                     remaining(self.deadline)
                         .with_context(|| format!("Chromium timed out during {method}"))?;

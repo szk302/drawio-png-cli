@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use drawio_png_cli::{chromium::ChromiumMode, document, fonts, png_data, render, storage};
+use drawio_png_cli::{
+    chromium::ChromiumMode, document, fonts, interrupt, png_data, render, storage,
+};
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -146,9 +148,15 @@ fn run(cli: Cli) -> Result<()> {
 }
 
 fn main() -> std::process::ExitCode {
+    interrupt::install();
     match run(Cli::parse()) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
+            // A signal can surface as another error from the wait it interrupted.
+            if let Some(code) = interrupt::exit_code() {
+                eprintln!("error: interrupted (signal {})", code - 128);
+                return code.into();
+            }
             eprintln!("error: {error:#}");
             std::process::ExitCode::FAILURE
         }

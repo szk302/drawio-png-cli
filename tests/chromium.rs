@@ -910,4 +910,62 @@ wait
         let profile = fs::read_to_string(dir.path().join("profile")).unwrap();
         assert!(!PathBuf::from(profile.trim()).exists());
     }
+
+    #[test]
+    fn termination_signals_stop_the_renderer_and_remove_its_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = script(
+            dir.path(),
+            "chromium",
+            r#"
+for arg in "$@"; do case "$arg" in --user-data-dir=*) echo "${arg#--user-data-dir=}" > "$(dirname "$0")/profile";; esac; done
+(sleep 1; touch "$(dirname "$0")/escaped") &
+wait
+"#,
+        );
+        let output = dir.path().join("out.png");
+        fs::write(dir.path().join("in.xml"), MODEL).unwrap();
+        for signal in [libc::SIGTERM, libc::SIGINT] {
+            fs::write(&output, b"original").unwrap();
+            let _ = fs::remove_file(dir.path().join("profile"));
+            let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_dip"))
+                .env("DIP_CHROME_PATH", &path)
+                .env_remove("DIP_CHROME_ARGS")
+                .env_remove("DIP_CHROMIUM_MODE")
+                .env_remove("DIP_DRAWIO_WEB_PATH")
+                .args(["embed", "--renderer", "chromium", "-i"])
+                .arg(dir.path().join("in.xml"))
+                .arg("-o")
+                .arg(&output)
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            // Wait until the fake browser has started.
+            let start = Instant::now();
+            while !dir.path().join("profile").exists() {
+                assert!(start.elapsed() < Duration::from_secs(10));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            unsafe { libc::kill(child.id() as i32, signal) };
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(
+                    start.elapsed() < Duration::from_secs(10),
+                    "dip did not exit"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            };
+            let mut stderr = String::new();
+            std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+            assert_eq!(status.code(), Some(128 + signal), "{stderr}");
+            assert!(stderr.contains("interrupted"), "{stderr}");
+            assert_eq!(fs::read(&output).unwrap(), b"original");
+            let profile = fs::read_to_string(dir.path().join("profile")).unwrap();
+            assert!(!PathBuf::from(profile.trim()).exists());
+            std::thread::sleep(Duration::from_millis(1200));
+            assert!(!dir.path().join("escaped").exists());
+        }
+    }
 }
