@@ -114,6 +114,19 @@ included in this project's source package. dip calls a separately installed Desk
 The Chromium renderer bundles the limited subset described below. The test diagrams and PNG fixtures were generated for this project;
 see [the fixture provenance](tests/fixtures/README.md).
 
+## musl libc (Linux release binaries)
+
+The Linux release archives are built for the `*-unknown-linux-musl` targets
+of Rust 1.98.1, which statically link musl libc 1.2.5 (with the security
+patches applied by the Rust toolchain). musl is MIT-licensed;
+[its COPYRIGHT file](assets/licenses/musl-1.2.5-COPYRIGHT.txt) is included
+unmodified from https://git.musl-libc.org/cgit/musl/plain/COPYRIGHT?h=v1.2.5
+(SHA-256 `f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af`).
+These binaries also contain LLVM libunwind, whose Apache-2.0 WITH
+LLVM-exception license does not require notices for such embedded object
+code. The macOS and Windows binaries and builds for glibc targets do not
+contain musl.
+
 ## Bundled Chromium renderer assets
 
 The Chromium renderer embeds unmodified, gzip-compressed subsets of draw.io

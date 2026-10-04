@@ -4,7 +4,28 @@
 
 ## インストール
 
-開発環境の Rust は `mise.toml` で固定しています。
+[GitHub Releases](https://github.com/szk302/drawio-png-cli/releases) から、OS に合ったアーカイブを取得して展開し、`dip`（Windows は `dip.exe`）を PATH の通った場所に置きます。アーカイブにはライセンス通知一式を同梱しています。
+
+| OS | アーカイブ |
+| --- | --- |
+| Linux x86_64 / ARM64 | `dip-<version>-x86_64-unknown-linux-musl.tar.gz` / `dip-<version>-aarch64-unknown-linux-musl.tar.gz`（静的リンク） |
+| macOS Apple silicon / Intel | `dip-<version>-aarch64-apple-darwin.tar.gz` / `dip-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows x86_64 | `dip-<version>-x86_64-pc-windows-msvc.zip` |
+
+```sh
+# 例: Linux x86_64。SHA256SUMS で改ざんを確認する
+version=0.1.0
+gh release download "v$version" -R szk302/drawio-png-cli \
+  -p "dip-$version-x86_64-unknown-linux-musl.tar.gz" -p SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+# GitHub Actions でビルドされたことの確認（任意）
+gh attestation verify "dip-$version-x86_64-unknown-linux-musl.tar.gz" -R szk302/drawio-png-cli
+tar xzf "dip-$version-x86_64-unknown-linux-musl.tar.gz" dip
+```
+
+macOS のバイナリは署名・公証していません。ブラウザーで取得した場合は、初回実行時に Gatekeeper の警告が出ることがあります（`xattr -d com.apple.quarantine dip` で解除できます）。
+
+ソースからビルドする場合、開発環境の Rust は `mise.toml` で固定しています。
 
 ```sh
 mise install
@@ -297,5 +318,12 @@ CIでは `scripts/cargo_licenses.py --check` で更新漏れを検出し、許�
 ```sh
 mise exec -- cargo build --release --locked
 python3 scripts/package_binary.py target/release/dip target/dip.tar.gz
-# Windowsでは入力を target/release/dip.exe に変更
+# Windowsでは入力を target/release/dip.exe に、出力を .zip に変更
+```
+
+リリースは、`Cargo.toml` の `version` と一致するタグ（例: `v0.1.0`）をプッシュすると `.github/workflows/release.yml` が作成します。CI と同じ検査を通過した後、Linux（musl）・macOS・Windows のバイナリを通知一式とともにアーカイブし、`SHA256SUMS` とビルド来歴の証明（attestation）を付けて GitHub Release に公開します。`v0.2.0-rc.1` のように `-` を含むタグはプレリリースになります。Linux 版は musl を静的リンクするため、`assets/licenses/musl-1.2.5-COPYRIGHT.txt` を同梱しています。`mise.toml` の Rust を更新した際は、そのツールチェーンが使う musl の版（Rust リポジトリの `src/ci/docker/scripts/musl.sh`）を確認し、異なれば通知を差し替えてください。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
 ```

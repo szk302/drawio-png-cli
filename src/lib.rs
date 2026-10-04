@@ -19,6 +19,8 @@ pub const BUNDLED_LICENSES: &str = concat!(
     include_str!("../THIRD_PARTY_NOTICES.md"),
     "\n\n--- Bundled draw.io renderer ---\n",
     include_str!("../assets/drawio/README.md"),
+    "\n\n--- musl libc 1.2.5 (statically linked into the Linux release binaries) ---\n",
+    include_str!("../assets/licenses/musl-1.2.5-COPYRIGHT.txt"),
     "\n\n--- Chromium resampling (Copyright 2011, 2012 The Chromium Authors) ---\n",
     include_str!("../assets/licenses/chromium-BSD-3-Clause.txt"),
     "\n\n--- DOMPurify-Apache-2.0.txt ---\n",
