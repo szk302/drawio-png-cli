@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `raw` | draw.ioエクスポーターをDPR 1で描画し、画面キャプチャをそのまま使用 | 103×43 |
 | `desktop` | DPR 2の画面キャプチャをHamming1で半分に縮小 | 104×44 |
-| `vscode`（既定） | `Editor.exportToCanvas()` でSVGを画像化しCanvasからPNGを取得 | 102×42 |
+| `vscode`（既定） | VS Code拡張1.9.0と同じdraw.io 26.0.2の `Editor.exportToCanvas()` でSVGを画像化しCanvasからPNGを取得 | 101×41 |
 
 全モードで先頭ページを描画し、全ページの編集用XMLを埋め込む。`raw` の「そのまま」はPNGの画素を縮小・再加工しないという意味で、XMLメタデータは追加する。
 
@@ -28,17 +28,26 @@ rawの取得画像はRGBAで64 MiB（16,777,216画素）以下。desktopは2倍�
 
 ## vscodeの比較対象
 
-同梱Web資材はdraw.ioの `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`。これはローカルで調査したVS Code拡張（コミット `79500e6d467a95906a5f03680627c8f26ad3a0af`、package.jsonのバージョン1.9.0）が固定するサブモジュールと同じコミットである。
+基準はVS Code拡張 `hediet.vscode-drawio` の安定版1.9.0（タグ `v1.9.0`、`132921f1c189d1b6239e2b0246ebd8190ca23ba5`、2025-02-19）。同梱するvscode用Web資材は、このタグが固定するdraw.ioサブモジュール `96a916a337d13fc8bf622c8a67d422bd284eabe5`（26.0.2）である。raw・desktop用の資材（31.4.5）とは別に同梱する。
 
-拡張のWebview HTMLとメッセージ送受信をChromium 153.0.8010.47 / Linux ARM64上で再現して生成したPNGを基準にする。VS Code本体での実機検証ではない。拡張側はlightテーマ、`simpleLabels=false`、追加プラグイン・カスタムスタイルなし。OS・フォント・ブラウザー・Web資材・拡張設定が異なる場合の完全一致は保証しない。
+拡張の2026-06以降のプレリリース（`v1.9.2606…` 以降のタグ）は31.x系のdraw.ioを固定しているが、`package.json` の版数は1.9.0のままである。draw.io 31.x では線幅の描画位置に合わせて出力範囲を広げる処理（jgraph/drawio#4938）が加わり、100×40の矩形は102×42になる。安定版1.9.0では101×41で、dipのvscodeモードはこちらに合わせる。以前の基準（31.4.5）での比較は [調査記録](vscode-rendering.md) に残している。
 
-変更前のDesktop互換方式との比較は [調査記録](vscode-rendering.md) に残している。Desktop互換の方式選定時の実測詳細はコミット `24dd930` の `docs/rendering.md` に保存されている。
+拡張v1.9.0のWebview HTMLとメッセージ送受信をGoogle Chrome 154.0.8037.97 / Linux ARM64上で再現し、エディターの表示倍率100%で保存したPNGを基準にする。VS Code本体での実機検証ではない。拡張側はlightテーマ、`simpleLabels=false`、追加プラグイン・カスタムスタイルなし。
+
+### VS Code本体の保存結果との差
+
+- 拡張の保存結果は、保存時のエディターの表示倍率に依存する。倍率100%では一致するが、ウィンドウに合わせて縮小表示していると線の位置がずれる。dipは倍率100%の結果に合わせる。
+- 画面の拡大率（DPR 1・1.25・1.5・1.75・2）は結果に影響しない。
+- devcontainer・WSLを使う場合も、Webviewはホスト側のVS Codeが描画する。WindowsとLinuxでは文字（Helveticaの代替フォント）、点線・アイコンの丸めが異なり、寸法・配置が一致しても画素差が残る。
+- OS・フォント・ブラウザー・Web資材・拡張設定が異なる場合の完全一致は保証しない。
+
+Desktop互換の方式選定時の実測詳細はコミット `24dd930` の `docs/rendering.md` に保存されている。
 
 ## vscodeの描画と保存
 
 1. 全ページを検証・展開し、先頭ページの `mxGraphModel` を描画する。ページ間のセルID重複が干渉しないよう、描画用には先頭ページを独立したXML文書へ移す。
 2. draw.ioの `Editor.setGraphXml()` で背景・図形・ラベル等を読み込む。フォントの読み込み完了を待って再描画する。
-   ラベルの `%page%`・`%pagenumber%`・`%pagecount%` は、拡張の `EditorUi` と同じくページ名・1・全ページ数に置換する。`raw`・`desktop` は上流 `export3.html` の処理に従い、Desktopと同様に `%pagecount%` を置換しない。
+   ラベルの `%page%`・`%pagenumber%`・`%pagecount%` は、拡張の `EditorUi` と同じくページ名・1・全ページ数に置換する。`mxfile` で囲まれていない単独の `mxGraphModel` のページ名は、拡張が英語UIで作るページと同じ `Page-1` とする。draw.io 26.0.2 は `%pagecount+1%` などの計算式を解釈しないため、そのまま表示する。`raw`・`desktop` は上流 `export3.html` の処理に従い、Desktopと同様に `%pagecount%` を置換しない。
 3. `mxfile` の `scale`（既定1）・`border`（既定0）を `exportToCanvas()` に渡す。倍率と余白の適用順もdraw.ioに従う。
 4. SVG内の画像・フォントを埋め込み、Canvasの `toDataURL('image/png')` からPNGを取得する。
 5. RustでPNGを検証し、全ページのXMLを埋め込んでアトミックに保存する。XMLはCLIの正規化結果を使い、拡張が再保存するXML文字列との完全一致は求めない。
@@ -55,11 +64,11 @@ VS Code側の大画像に対する自動縮小は適用しない。CLIは上限�
 
 外部画像・Webフォントのネットワーク取得は既定で禁止する。`vscode` モードでは `--allow-network` 使用時も、Canvasへ埋め込むには配信元のCORS許可が必要。draw.ioの公開画像プロキシへは転送しない。取得・デコードに失敗した資材を検出した場合はエラーにする。
 
-同梱資材で扱えない図形等には `DIP_DRAWIO_WEB_PATH` を利用できる。指定先の `export3.html` が、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` を提供する必要がある。別コミットの資材はVS Code互換性の検証対象外。
+同梱資材で扱えない図形等には `DIP_DRAWIO_WEB_PATH` を利用できる。vscodeモードでは、拡張と同じく指定先の `js/shapes-14-6-5.min.js`・`js/stencils.min.js` があれば描画前に読み込み、`shapes/*.js` は取得しない。draw.io 26.0.2には `shapes/` がなく、AWS等の図形はこれらのファイルから読み込む。図形・アイコン（AWS図形の `resIcon`・`grIcon`、ステンシルの `include-shape` 等）が見つからない場合、上流は空白のまま描画を続けるが、dipはエラーにして既存出力を保持する。指定先の `export3.html` が、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` を提供する必要がある。確認済みの資材は、vscodeが `96a916a337d13fc8bf622c8a67d422bd284eabe5`（26.0.2）、raw・desktopが `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`（31.4.5）。別コミットの資材は互換性の検証対象外。
 
 ## 回帰テスト
 
-vscodeの文字なし矩形と `scale=2, border=10` のPNGは、拡張の保存経路で独立生成した固定fixtureとRGBAを比較する。Desktop互換はDesktop基準fixtureと比較し、rawは直接取得の寸法とXML保持を確認する。複数ページの選択、透明背景・明示背景、HTML・埋め込み画像、外部画像の許可／禁止、容量超過、不正倍率、タイムアウトもChromium実機テストで確認する。
+vscodeの文字なし矩形と `scale=2, border=10` のPNGは、拡張v1.9.0の保存経路で独立生成した固定fixtureとRGBAを比較する。Desktop互換はDesktop基準fixtureと比較し、rawは直接取得の寸法とXML保持を確認する。複数ページの選択、透明背景・明示背景、HTML・埋め込み画像、外部画像の許可／禁止、容量超過、不正倍率、タイムアウトもChromium実機テストで確認する。
 
 ```sh
 DIP_TEST_CHROME_PATH=/usr/bin/google-chrome \

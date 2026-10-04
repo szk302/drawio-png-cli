@@ -1,9 +1,15 @@
 # Bundled draw.io renderer
 
 Upstream: https://github.com/jgraph/drawio
-Revision: `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`.
 
-`manifest.json` identifies the four unmodified upstream assets and SHA-256
+dip bundles two sets of the same four unmodified upstream files:
+
+| Directory | Revision | draw.io | Used by |
+| --- | --- | --- | --- |
+| `.` | `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd` | 31.4.5 | `raw` and `desktop` modes (Desktop 31.4.5 reference) |
+| `vscode/` | `96a916a337d13fc8bf622c8a67d422bd284eabe5` | 26.0.2 | `vscode` mode |
+
+Each directory's `manifest.json` identifies the assets and SHA-256
 hashes of their decompressed bytes. They are stored with deterministic gzip
 headers and embedded into `dip`. `chromium.html`, `chromium-init.js`, and
 `chromium-render.js` in the parent directory are original MIT-licensed dip
@@ -11,9 +17,11 @@ integration code; they configure local URLs, disable optional bundled math,
 check unsupported shapes, decode embedded `shape=stencil(...)` shapes with a
 size limit, and select `Editor.exportToCanvas()` for the `vscode`
 mode or `render()` for the `raw` and `desktop` capture modes.
-The revision matches the draw.io submodule pinned by the inspected
-[`hediet.vscode-drawio`](https://github.com/hediet/vscode-drawio) extension
-(`79500e6d467a95906a5f03680627c8f26ad3a0af`). Its reference-only use is documented
+The `vscode/` revision is the draw.io submodule pinned by the stable
+[`hediet.vscode-drawio`](https://github.com/hediet/vscode-drawio) 1.9.0 release
+(tag `v1.9.0`, `132921f1c189d1b6239e2b0246ebd8190ca23ba5`). The 31.4.5 revision
+is pinned by the extension's later pre-releases, which also report version 1.9.0
+in `package.json`. Its reference-only use is documented
 in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). No upstream source is edited.
 
 ## Included works
@@ -21,14 +29,16 @@ in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). No upstream source is
 - draw.io/mxGraph: Apache-2.0. Copyright JGraph Holdings Ltd and draw.io AG;
   individual years and notices remain in the upstream files.
 - spin.js 2.0.0: MIT, Copyright (c) 2011-2014 Felix Gnass.
-- DOMPurify 3.4.15: Apache-2.0 (selected from upstream's dual licensing),
-  Copyright (c) Cure53 and other contributors.
-- pako 2.2.0: MIT AND Zlib, Vitaly Puzrin, Andrei Tuputcyn/Tupitsin,
-  Jean-loup Gailly and Mark Adler.
+- DOMPurify 3.4.15 (31.4.5) and 3.2.3 (26.0.2): Apache-2.0 (selected from
+  upstream's dual licensing), Copyright (c) Cure53 and other contributors.
+- pako 2.2.0 (31.4.5) and 2.1.0 (26.0.2): MIT AND Zlib, Vitaly Puzrin,
+  Andrei Tuputcyn/Tupitsin, Jean-loup Gailly and Mark Adler.
 - Rough.js 4.6.6 and its hachure-fill, path-data-parser, points-on-path,
   points-on-curve components: MIT, Copyright (c) 2019/2020/2022 Preet Shihn.
   All upstream copyright statements are retained in `licenses/`.
 
+Both revisions carry the same draw.io Apache-2.0 license text and the same
+Rough.js and spin.js builds.
 The viewer composition was checked against `etc/build/build.xml`: the nonstatic
 viewer contains the basic mxGraph/editor/viewer code and the libraries above.
 It does not concatenate `shapes-14-6-5.min.js`. This package excludes `app.min.js`,

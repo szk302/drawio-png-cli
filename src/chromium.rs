@@ -232,7 +232,7 @@ pub fn render_with_mode(
     ensure!(xml.len() <= MAX_BYTES, "XML exceeds 64 MiB limit");
     let deadline = Instant::now() + timeout;
     let profile = tempfile::Builder::new().prefix("dip-chromium-").tempdir()?;
-    let server = AssetServer::start(web_root, allow_network)?;
+    let server = AssetServer::start(web_root, allow_network, mode == ChromiumMode::Vscode)?;
     let mut log = tempfile::tempfile()?;
     let mut command = Command::new(program);
     #[cfg(unix)]
@@ -364,8 +364,8 @@ pub fn render_with_mode(
         let window = cdp.call("Runtime.evaluate", json!({"expression":"window"}))?;
         let rendered = cdp.call("Runtime.callFunctionOn", json!({
             "objectId":window["result"]["objectId"],
-            "functionDeclaration":format!("function(xml, bundled, mode) {{ {} return dipRender(xml, bundled, mode); }}", include_str!("../assets/chromium-render.js")),
-            "arguments":[{"value":xml},{"value":server.bundled},{"value":mode.name()}],
+            "functionDeclaration":format!("function(xml, bundled, mode, preload) {{ {} return dipRender(xml, bundled, mode, preload); }}", include_str!("../assets/chromium-render.js")),
+            "arguments":[{"value":xml},{"value":server.bundled},{"value":mode.name()},{"value":server.preload}],
             "returnByValue":true, "awaitPromise":true
         }))?;
         ensure!(
@@ -561,6 +561,14 @@ impl Cdp {
                     "draw.io resource failed ({}): {}; check DIP_DRAWIO_WEB_PATH or --allow-network",
                     response["status"],
                     short(url)
+                );
+            }
+            // A dialog blocks the page's JavaScript until the deadline; report it instead.
+            "Page.javascriptDialogOpening" => {
+                bail!(
+                    "draw.io opened a {} dialog: {}",
+                    params["type"].as_str().unwrap_or("JavaScript"),
+                    short(params["message"].as_str().unwrap_or(""))
                 );
             }
             "Network.loadingFailed" => {

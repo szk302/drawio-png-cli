@@ -50,7 +50,7 @@ Chromiumの出力方式は `--chromium-mode raw|desktop|vscode` または環境�
 | --- | --- |
 | `raw` | draw.ioの描画結果をDPR 1でキャプチャし、画素の縮小・再加工をせず使用 |
 | `desktop` | Desktop互換。DPR 2でキャプチャし、Hamming1で半分へ縮小 |
-| `vscode` | VS Code拡張互換。SVG→CanvasでPNG化し、XMLの `scale`・`border` を反映 |
+| `vscode` | VS Code拡張1.9.0（draw.io 26.0.2）互換。SVG→CanvasでPNG化し、XMLの `scale`・`border` を反映 |
 
 全モードで先頭ページを描画し、全ページの編集用XMLをPNGに埋め込みます。`raw` もメタデータなしPNGを生成するモードではありません。`raw`・`desktop` は倍率1・余白0でdraw.ioのエクスポーターを呼び、XMLの `scale`・`border` は反映しません。
 
@@ -71,7 +71,9 @@ dip embed --renderer chromium --chromium-mode vscode -i diagram.xml -o diagram.d
 
 環境変数の値は `raw`・`desktop`・`vscode` の完全一致で指定します。空文字・未知の値は描画前にエラーになります。CLIでモードを指定した場合は環境変数を読みません。Desktop選択時と `extract`・`validate`・`embed --no-render` でも読みません。環境変数はレンダラー選択を変更しないため、Chromiumを確実に使うには `--renderer chromium` を指定してください。
 
-`--renderer desktop` はDesktopアプリを起動します。`--renderer chromium --chromium-mode desktop` はChromiumだけでDesktop互換処理を行います。互換モードは参照環境の処理に合わせたもので、異なるフォント・ブラウザー・draw.io資材・拡張設定での完全一致は保証しません。詳細は [描画互換性](docs/rendering.md) を参照してください。
+`--renderer desktop` はDesktopアプリを起動します。`--renderer chromium --chromium-mode desktop` はChromiumだけでDesktop互換処理を行います。互換モードは参照環境の処理に合わせたもので、異なるフォント・ブラウザー・draw.io資材・拡張設定での完全一致は保証しません。
+
+`vscode` は拡張の安定版1.9.0が同梱するdraw.io 26.0.2に合わせ、`raw`・`desktop` はDesktop 31.4.5に合わせた資材をそれぞれ同梱しています。拡張の保存結果は保存時のエディターの表示倍率で変わり、dipは倍率100%の結果に合わせます。devcontainerやWSLでも図はホスト側のVS Codeが描画するため、WindowsとLinuxではフォント等による画素差が残ります。詳細は [描画互換性](docs/rendering.md) を参照してください。
 
 `--renderer`・`--chromium-mode`・`--allow-network` は `--no-render` と併用できません。`--chromium-mode` と `--allow-network` はChromium専用です。`auto` でDesktopが選ばれる場合はエラーになるため、`--renderer chromium` も指定してください。
 
@@ -111,12 +113,14 @@ dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 同梱資材は基本図形・接続線・日本語・HTMLラベル・埋め込み画像・埋め込みステンシル（`shape=stencil(...)`）に対応します。埋め込みステンシルは展開後の合計64 MiBまでとし、壊れたデータや、`include-shape` で参照する図形が見つからない場合はエラーにします。追加アイコン・ステンシル、数式、Mermaid、自動レイアウトの資材は含みません。未知の図形や必要資材の欠落はエラーになります。同梱資材で対応できない図面には、Desktop または別途用意した draw.io Web資材を指定してください。
 
 ```sh
-# export3.html を含む Webアプリのルートを指定
-export DIP_DRAWIO_WEB_PATH=/path/to/drawio/src/main/webapp
+# export3.html を含む Webアプリのルートを指定（拡張1.9.0と同じ draw.io 26.0.2 の例）
+git clone https://github.com/jgraph/drawio.git
+git -C drawio checkout 96a916a337d13fc8bf622c8a67d422bd284eabe5
+export DIP_DRAWIO_WEB_PATH="$PWD/drawio/src/main/webapp"
 dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 ```
 
-`DIP_DRAWIO_WEB_PATH` を解除すると同梱資材に戻ります。指定が不正な場合はエラーとし、同梱資材には切り替えません。互換性を確認した上流コミットは `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd` です。別バージョンでは `export3.html` と、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` の互換性が必要です。
+`DIP_DRAWIO_WEB_PATH` を解除すると同梱資材に戻ります。指定が不正な場合はエラーとし、同梱資材には切り替えません。互換性を確認した上流コミットは、`vscode` が `96a916a337d13fc8bf622c8a67d422bd284eabe5`（26.0.2、拡張1.9.0と同じ）、`raw`・`desktop` が `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`（31.4.5）です。`vscode` では、拡張と同じく `js/shapes-14-6-5.min.js`・`js/stencils.min.js` があれば描画前に読み込みます。draw.io 26.0.2 には `shapes/` フォルダーがないため、AWS などの図形はこれらから読み込みます。別バージョンでは `export3.html` と、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` の互換性が必要です。
 
 図面が参照する外部画像・Webフォントの取得は既定で禁止し、必要な外部資材がある場合はエラーにします。明示的に許可するときは次を使います。
 

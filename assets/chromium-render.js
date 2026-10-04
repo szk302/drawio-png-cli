@@ -1,6 +1,28 @@
 // Called with JSON arguments through CDP, never XML interpolated as source code.
-async function dipRender(xml, bundled, mode) {
+async function dipRender(xml, bundled, mode, preload) {
     if (bundled) mxStencilRegistry.dynamicLoading = false;
+    // Load the shape bundles the VS Code extension includes, in its order.
+    for (const src of preload) {
+        await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = () => reject(Error('Unable to load ' + src));
+            document.head.appendChild(script);
+        });
+    }
+    // shapes-14-6-5.min.js already defines every shapes/*.js library, and the
+    // extension's draw.io has no shapes/ directory to load them from. Stencil XML
+    // still loads on demand; stencils.min.js serves it from its embedded copies.
+    if (preload.includes('js/shapes-14-6-5.min.js')) {
+        for (const files of Object.values(mxStencilRegistry.libraries)) {
+            for (const file of [].concat(files)) {
+                if (typeof file === 'string' && file.startsWith(SHAPES_PATH + '/') && file.endsWith('.js')) {
+                    mxStencilRegistry.setFileLoaded(file);
+                }
+            }
+        }
+    }
     const doc = mxUtils.parseXml(xml);
     if (doc.getElementsByTagName('parsererror').length) throw Error('Invalid XML');
     const model = doc.documentElement.nodeName === 'mxGraphModel'
@@ -62,12 +84,27 @@ async function dipRender(xml, bundled, mode) {
         }
         return drawNode.apply(this, arguments);
     };
+    // Shapes such as mxgraph.aws4.resourceIcon look up their icon (resIcon, grIcon)
+    // while painting and silently omit it when it is missing. Record every named
+    // lookup that finds neither a stencil nor a shape class; dip fails on these.
+    const getStencil = mxStencilRegistry.getStencil;
+    mxStencilRegistry.getStencil = function(name) {
+        const stencil = getStencil.apply(this, arguments);
+        if (stencil == null && typeof name === 'string' && name.trim() !== '' &&
+            !mxCellRenderer.defaultShapes[name]) {
+            window.dipErrors.push('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
+        }
+        return stencil;
+    };
     mxCellRenderer.prototype.createShape = function(state) {
         const name = state.style[mxConstants.STYLE_SHAPE];
         if (typeof name === 'string' && name.startsWith('stencil(') && name.endsWith(')')) {
             return new mxShape(inlineStencil(name.slice(8, -1)));
         }
-        if (name && !mxCellRenderer.defaultShapes[name] && !mxStencilRegistry.getStencil(name)) {
+        // getStencil can load a shape library (e.g. shapes/mxAWS4.js) that registers
+        // a shape class rather than a stencil, so check the registry again after it.
+        if (name && !mxCellRenderer.defaultShapes[name] && !mxStencilRegistry.getStencil(name) &&
+            !mxCellRenderer.defaultShapes[name]) {
             throw Error('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
         }
         return original.apply(this, arguments);
@@ -93,7 +130,8 @@ async function dipRender(xml, bundled, mode) {
     const page = model.parentNode;
     const getGlobalVariable = graph.getGlobalVariable;
     graph.getGlobalVariable = function(name) {
-        if (name === 'page') return page.nodeName === 'diagram' ? page.getAttribute('name') : '';
+        // The extension wraps a bare mxGraphModel in a new page named Page-1 (English UI).
+        if (name === 'page') return page.nodeName === 'diagram' ? page.getAttribute('name') : 'Page-1';
         if (name === 'pagenumber') return 1;
         // EditorUi normally supplies this; count pages before the first is separated.
         if (name === 'pagecount') return file.nodeName === 'mxfile'
@@ -127,6 +165,7 @@ async function dipRender(xml, bundled, mode) {
             // Resolve URLs directly; do not send images to draw.io's public proxy.
             null, null, scale, null, null, new mxUrlConverter(), graph, border);
     });
+    if (window.dipErrors.length) throw Error(window.dipErrors.join('; '));
     checkSize(canvas.width, canvas.height);
     const uri = canvas.toDataURL('image/png');
     if (!uri.startsWith('data:image/png;base64,')) throw Error('Canvas returned no PNG');

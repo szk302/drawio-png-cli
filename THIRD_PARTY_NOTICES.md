@@ -81,7 +81,8 @@ SOFTWARE.
 ## VS Code Draw.io Integration (reference only)
 
 - Project: https://github.com/hediet/vscode-drawio (`hediet.vscode-drawio`)
-- Reviewed revision: `79500e6d467a95906a5f03680627c8f26ad3a0af`
+- Reviewed revisions: `79500e6d467a95906a5f03680627c8f26ad3a0af` and the
+  stable release tag `v1.9.0` (`132921f1c189d1b6239e2b0246ebd8190ca23ba5`)
 - Upstream license: GPL version 3 (`GPL-3.0` in its `package.json`);
   [license text at the reviewed revision](https://github.com/hediet/vscode-drawio/blob/79500e6d467a95906a5f03680627c8f26ad3a0af/LICENSE.md).
 
@@ -115,8 +116,9 @@ see [the fixture provenance](tests/fixtures/README.md).
 
 ## Bundled Chromium renderer assets
 
-The Chromium renderer embeds an unmodified, gzip-compressed subset of draw.io
-at revision `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`. This differs from the
+The Chromium renderer embeds unmodified, gzip-compressed subsets of draw.io
+at revisions `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd` (31.4.5) and
+`96a916a337d13fc8bf622c8a67d422bd284eabe5` (26.0.2). This differs from the
 reference-only use of the Desktop checkout described above.
 
 See [the asset inventory](assets/drawio/README.md),

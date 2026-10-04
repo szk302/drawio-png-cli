@@ -199,10 +199,10 @@ fn real_chromium_renders_first_page_and_preserves_xml() {
     assert!(actual.0 > 1 && actual.1 > 1);
     assert_eq!(actual, pixels(&render(MODEL, None, false).unwrap()));
 
-    // VS Code draw.io xmlpng exports this font-independent rectangle at 102x42.
+    // The stable VS Code extension (1.9.0, draw.io 26.0.2) exports this rectangle at 101x41.
     let geometry = r##"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" vertex="1" parent="1" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></root></mxGraphModel>"##;
     let actual = pixels(&render(geometry, None, false).unwrap());
-    assert_eq!((actual.0, actual.1), (102, 42));
+    assert_eq!((actual.0, actual.1), (101, 41));
     assert_eq!(
         actual,
         pixels(include_bytes!("fixtures/geometry-vscode.png"))
@@ -217,8 +217,10 @@ fn real_chromium_renders_first_page_and_preserves_xml() {
     let defaults = format!("<mxfile><diagram>{geometry}</diagram></mxfile>");
     assert_eq!(pixels(&render(&defaults, None, false).unwrap()), actual);
     // The SVG pipeline preserves transparency; explicit backgrounds are filled.
-    assert!(actual.2.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
-    let white = geometry.replace("<mxGraphModel>", "<mxGraphModel background=\"#ffffff\">");
+    // The plain export is fully covered by the rectangle, so check the border.
+    let bordered = pixels(&render(&options, None, false).unwrap());
+    assert!(bordered.2.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
+    let white = options.replace("<mxGraphModel>", "<mxGraphModel background=\"#ffffff\">");
     let white = pixels(&render(&white, None, false).unwrap());
     assert!(white.2.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
 }
@@ -239,7 +241,7 @@ fn real_chromium_modes_select_distinct_outputs_and_preserve_xml() {
         ),
         (
             "vscode",
-            (102, 42),
+            (101, 41),
             Some(&include_bytes!("fixtures/geometry-vscode.png")[..]),
         ),
     ] {
@@ -408,7 +410,8 @@ fn real_chromium_vscode_resolves_page_placeholders() {
             r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><object id="2" label="{label}" placeholders="{placeholders}"><mxCell vertex="1" parent="1" style="whiteSpace=wrap;html=1;"><mxGeometry x="10" y="20" width="100" height="40" as="geometry"/></mxCell></object></root></mxGraphModel>"#
         )
     };
-    let label = "%page% %pagenumber%/%pagecount% %pagecount+1%";
+    // draw.io 26.0.2 (extension 1.9.0) has no %pagecount+1% arithmetic.
+    let label = "%page% %pagenumber%/%pagecount%";
     let file = |first: String, pages: usize| {
         let mut xml = format!("<mxfile><diagram name=\"First\">{first}</diagram>");
         for _ in 1..pages {
@@ -417,45 +420,40 @@ fn real_chromium_vscode_resolves_page_placeholders() {
         xml + "</mxfile>"
     };
     let image = |xml: &str| pixels(&render(xml, None, false).unwrap());
-    // Without EditorUi, upstream Graph leaves %pagecount% unresolved.
+    // Without EditorUi, upstream Graph leaves %pagecount% unresolved. The
+    // extension names the page it creates for a bare model Page-1.
     assert_eq!(
         image(&model(label, 1)),
-        image(&model(" 1/1 2", 1)),
+        image(&model("Page-1 1/1", 0)),
         "single model"
     );
     for pages in [1, 3] {
         assert_eq!(
             image(&file(model(label, 1), pages)),
-            image(&file(
-                model(&format!("First 1/{pages} {}", pages + 1), 0),
-                pages
-            )),
+            image(&file(model(&format!("First 1/{pages}"), 0), pages)),
             "{pages} pages"
         );
     }
 }
 
-#[test]
-#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
-fn real_chromium_local_assets_and_unsupported_content() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
+/// Writes the bundled vscode-mode assets as a local DIP_DRAWIO_WEB_PATH root.
+fn vscode_web_root(root: &std::path::Path) {
     for (name, data) in [
         (
             "js/viewer.min.js",
-            &include_bytes!("../assets/drawio/js_viewer.min.js.gz")[..],
+            &include_bytes!("../assets/drawio/vscode/js_viewer.min.js.gz")[..],
         ),
         (
             "js/export-init.js",
-            &include_bytes!("../assets/drawio/js_export-init.js.gz")[..],
+            &include_bytes!("../assets/drawio/vscode/js_export-init.js.gz")[..],
         ),
         (
             "js/export.js",
-            &include_bytes!("../assets/drawio/js_export.js.gz")[..],
+            &include_bytes!("../assets/drawio/vscode/js_export.js.gz")[..],
         ),
         (
             "mxgraph/css/common.css",
-            &include_bytes!("../assets/drawio/mxgraph_css_common.css.gz")[..],
+            &include_bytes!("../assets/drawio/vscode/mxgraph_css_common.css.gz")[..],
         ),
     ] {
         let path = root.join(name);
@@ -471,10 +469,110 @@ fn real_chromium_local_assets_and_unsupported_content() {
         include_str!("../assets/chromium.html"),
     )
     .unwrap();
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_vscode_preloads_extension_shape_bundles() {
+    // draw.io 26.0.2 has no shapes/ directory; the extension preloads these
+    // bundles instead. Stand-ins keep the test self-contained: the shapes bundle
+    // registers a shape class that, like the AWS shapes, looks up its resIcon
+    // stencil while painting, and the stencils bundle serves stencil XML.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    vscode_web_root(root);
+    fs::write(
+        root.join("js/shapes-14-6-5.min.js"),
+        r#"function DipIcon() { mxRectangleShape.call(this); }
+mxUtils.extend(DipIcon, mxRectangleShape);
+DipIcon.prototype.paintVertexShape = function(c, x, y, w, h) {
+  mxRectangleShape.prototype.paintVertexShape.apply(this, arguments);
+  var icon = mxStencilRegistry.getStencil(mxUtils.getValue(this.style, 'resIcon', null));
+  if (icon != null) icon.drawShape(c, this, x, y, w, h);
+};
+mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', DipIcon);"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("js/stencils.min.js"),
+        r#"(function() {
+var load = mxStencilRegistry.loadStencil;
+mxStencilRegistry.loadStencil = function(filename, fn) {
+  if (filename == STENCIL_PATH + '/aws4.xml') {
+    var xml = mxUtils.parseXml('<shapes name="mxgraph.aws4"><shape name="Box" w="100" h="40" aspect="variable"><background><rect x="0" y="0" w="100" h="40"/></background><foreground><fillstroke/></foreground></shape></shapes>');
+    return fn != null ? window.setTimeout(function() { fn(xml); }, 0) : xml;
+  }
+  return load.apply(this, arguments);
+};
+})();"#,
+    )
+    .unwrap();
+    let cell =
+        |style: &str| MODEL.replace("vertex=\"1\"", &format!("vertex=\"1\" style=\"{style}\""));
+    let expected = pixels(&render(MODEL, None, false).unwrap());
+    // Neither style may request shapes/mxAWS4.js, which would fail with 404.
+    for style in [
+        "shape=mxgraph.aws4.resourceIcon;",
+        "shape=mxgraph.aws4.box;",
+        "shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.box;",
+    ] {
+        assert_eq!(
+            pixels(&render(&cell(style), Some(root.to_owned()), false).unwrap()),
+            expected,
+            "{style}"
+        );
+    }
+    // Upstream shapes omit an icon they cannot find; dip must not save that image.
+    let missing = cell("shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.missing_icon;");
+    let error = format!(
+        "{:#}",
+        render(&missing, Some(root.to_owned()), false).unwrap_err()
+    );
+    assert!(
+        error.contains("Unsupported shape: mxgraph.aws4.missing_icon"),
+        "{error}"
+    );
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_local_assets_and_unsupported_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    vscode_web_root(root);
     assert_eq!(
         pixels(&render(MODEL, Some(root.to_owned()), false).unwrap()),
         pixels(&render(MODEL, None, false).unwrap())
     );
+    // Shape libraries load on demand from local assets and register shape
+    // classes, not stencils. A stand-in library keeps the test self-contained.
+    let aws = MODEL.replace(
+        "vertex=\"1\"",
+        "vertex=\"1\" style=\"shape=mxgraph.aws4.resourceIcon;\"",
+    );
+    assert!(render(&aws, Some(root.to_owned()), false).is_err());
+    for (name, data) in [
+        (
+            "shapes/mxAWS4.js",
+            r#"function DipIcon() { mxRectangleShape.call(this); }
+mxUtils.extend(DipIcon, mxRectangleShape);
+DipIcon.prototype.paintVertexShape = function(c, x, y, w, h) {
+  mxRectangleShape.prototype.paintVertexShape.apply(this, arguments);
+  var icon = mxStencilRegistry.getStencil(mxUtils.getValue(this.style, 'resIcon', null));
+  if (icon != null) icon.drawShape(c, this, x, y, w, h);
+};
+mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', DipIcon);"#,
+        ),
+        ("stencils/aws4.xml", "<shapes name=\"mxgraph.aws4\"/>"),
+    ] {
+        fs::create_dir_all(root.join(name).parent().unwrap()).unwrap();
+        fs::write(root.join(name), data).unwrap();
+    }
+    assert_eq!(
+        pixels(&render(&aws, Some(root.to_owned()), false).unwrap()),
+        pixels(&render(MODEL, None, false).unwrap())
+    );
+    assert!(format!("{:#}", render(&aws, None, false).unwrap_err()).contains("Unsupported shape"));
     fs::remove_file(root.join("js/viewer.min.js")).unwrap();
     assert!(
         render(MODEL, Some(root.to_owned()), false)
@@ -547,6 +645,35 @@ fn real_chromium_deadline_covers_javascript_execution() {
     .unwrap_err();
     assert!(format!("{error:#}").contains("timed out"));
     assert!(start.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_reports_dialogs_without_waiting_for_the_deadline() {
+    let (program, args) = browser();
+    let dir = tempfile::tempdir().unwrap();
+    for (script, message) in [
+        ("alert('broken asset')", "alert dialog: broken asset"),
+        ("confirm('continue?')", "confirm dialog: continue?"),
+    ] {
+        fs::write(
+            dir.path().join("export3.html"),
+            format!("<!doctype html><script>{script}</script>"),
+        )
+        .unwrap();
+        let start = std::time::Instant::now();
+        let error = chromium::render_with(
+            &program,
+            MODEL,
+            Duration::from_secs(30),
+            &args,
+            Some(dir.path().to_owned()),
+            false,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains(message), "{error:#}");
+        assert!(start.elapsed() < Duration::from_secs(10));
+    }
 }
 
 #[test]
