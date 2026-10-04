@@ -281,7 +281,8 @@ fn base_images_with_broken_zlib_trailers_never_replace_output() {
 fn skill_guides_match_this_dip() {
     let core = include_str!("../assets/skill/drawio-png.md");
     let full = include_str!("../assets/skill/drawio-png-full.md");
-    let stub = include_str!("../skills/drawio-png/SKILL.md");
+    // Normalize in case a checkout converted line endings.
+    let stub = &include_str!("../skills/drawio-png/SKILL.md").replace("\r\n", "\n");
     for (args, expected) in [(vec!["skill"], core), (vec!["skill", "--full"], full)] {
         let output = dip()
             .args(&args)
@@ -319,7 +320,7 @@ fn skill_guides_match_this_dip() {
             .collect()
     };
     let (top, library) = (commands(help(&[])), commands(help(&["library"])));
-    for text in [core, full, stub] {
+    for text in [core, full, stub.as_str()] {
         for mention in text.split("dip ").skip(1) {
             let mut words = mention.split(|c: char| !c.is_ascii_alphanumeric() && c != '-');
             let command = words.next().unwrap_or("");
