@@ -573,6 +573,35 @@ fn real_chromium_deadline_covers_javascript_execution() {
 
 #[test]
 #[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_reports_dialogs_without_waiting_for_the_deadline() {
+    let (program, args) = browser();
+    let dir = tempfile::tempdir().unwrap();
+    for (script, message) in [
+        ("alert('broken asset')", "alert dialog: broken asset"),
+        ("confirm('continue?')", "confirm dialog: continue?"),
+    ] {
+        fs::write(
+            dir.path().join("export3.html"),
+            format!("<!doctype html><script>{script}</script>"),
+        )
+        .unwrap();
+        let start = std::time::Instant::now();
+        let error = chromium::render_with(
+            &program,
+            MODEL,
+            Duration::from_secs(30),
+            &args,
+            Some(dir.path().to_owned()),
+            false,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains(message), "{error:#}");
+        assert!(start.elapsed() < Duration::from_secs(10));
+    }
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
 fn real_chromium_html_embedded_images_and_network_policy() {
     use base64::Engine;
     use std::sync::{

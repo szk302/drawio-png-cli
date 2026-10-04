@@ -563,6 +563,14 @@ impl Cdp {
                     short(url)
                 );
             }
+            // A dialog blocks the page's JavaScript until the deadline; report it instead.
+            "Page.javascriptDialogOpening" => {
+                bail!(
+                    "draw.io opened a {} dialog: {}",
+                    params["type"].as_str().unwrap_or("JavaScript"),
+                    short(params["message"].as_str().unwrap_or(""))
+                );
+            }
             "Network.loadingFailed" => {
                 bail!(
                     "draw.io resource failed: {}; check assets and --allow-network",
