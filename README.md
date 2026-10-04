@@ -321,7 +321,7 @@ python3 scripts/package_binary.py target/release/dip target/dip.tar.gz
 # Windowsでは入力を target/release/dip.exe に、出力を .zip に変更
 ```
 
-リリースは、`Cargo.toml` の `version` と一致するタグ（例: `v0.1.0`）をプッシュすると `.github/workflows/release.yml` が作成します。CI と同じ検査を通過した後、Linux（musl）・macOS・Windows のバイナリを通知一式とともにアーカイブし、`SHA256SUMS` とビルド来歴の証明（attestation）を付けて GitHub Release に公開します。`v0.2.0-rc.1` のように `-` を含むタグはプレリリースになります。
+リリースは、`Cargo.toml` の `version` と一致するタグ（例: `v0.1.0`）をプッシュすると `.github/workflows/release.yml` が作成します。CI と同じ検査を通過した後、Linux（musl）・macOS・Windows のバイナリを通知一式とともにアーカイブし、`SHA256SUMS` とビルド来歴の証明（attestation）を付けて GitHub Release に公開します。`v0.2.0-rc.1` のように `-` を含むタグはプレリリースになります。Linux 版は musl を静的リンクするため、`assets/licenses/musl-1.2.5-COPYRIGHT.txt` を同梱しています。`mise.toml` の Rust を更新した際は、そのツールチェーンが使う musl の版（Rust リポジトリの `src/ci/docker/scripts/musl.sh`）を確認し、異なれば通知を差し替えてください。
 
 ```sh
 git tag v0.1.0

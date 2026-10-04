@@ -117,6 +117,9 @@ fn license_texts_are_available_without_a_renderer() {
         "anyhow",
         "Microsoft Corporation",
         "Unicode",
+        // musl is statically linked into the Linux release binaries.
+        "musl as a whole is licensed under the following standard MIT license",
+        "Rich Felker",
     ] {
         assert!(text.contains(notice), "missing {notice}");
     }

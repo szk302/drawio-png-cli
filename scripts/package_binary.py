@@ -20,8 +20,13 @@ def main():
         root / "assets/drawio/licenses",
         root / "assets/licenses",
     ]
-    # Require the generated inventory even if a checkout accidentally omits it.
-    for path in [args.binary, root / "assets/licenses/cargo-dependencies.txt"]:
+    # Require the generated inventory and the musl notice for the static Linux
+    # builds even if a checkout accidentally omits them.
+    for path in [
+        args.binary,
+        root / "assets/licenses/cargo-dependencies.txt",
+        root / "assets/licenses/musl-1.2.5-COPYRIGHT.txt",
+    ]:
         if not path.is_file():
             parser.error(f"missing distribution input: {path}")
     for path in notices:
