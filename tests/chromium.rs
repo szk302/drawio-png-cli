@@ -678,6 +678,62 @@ fn real_chromium_reports_dialogs_without_waiting_for_the_deadline() {
 
 #[test]
 #[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_without_network_ignores_inherited_proxies() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    // Google Chrome sends background requests (updates, accounts) through an
+    // inherited proxy, which resolves names itself. Count every connection.
+    let (program, args) = browser();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+    let (connections, stop) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let (counter, signal) = (connections.clone(), stop.clone());
+    let worker = std::thread::spawn(move || {
+        while !signal.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok(_) => {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut command = dip();
+    command
+        .env("DIP_CHROME_PATH", &program)
+        .env("DIP_CHROME_ARGS", shell_words::join(&args))
+        .env("no_proxy", "localhost,127.0.0.1")
+        .env("NO_PROXY", "localhost,127.0.0.1");
+    for name in [
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ] {
+        command.env(name, &proxy);
+    }
+    command
+        .args(["embed", "--renderer", "chromium", "-o"])
+        .arg(dir.path().join("out.png"))
+        .write_stdin(MODEL)
+        .assert()
+        .success();
+    stop.store(true, Ordering::Relaxed);
+    worker.join().unwrap();
+    assert_eq!(connections.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
 fn real_chromium_html_embedded_images_and_network_policy() {
     use base64::Engine;
     use std::sync::{
@@ -842,6 +898,54 @@ mod unix {
         let error = selected();
         assert!(error.contains("chrome-selected"));
         assert!(!error.contains("chromium-selected"));
+    }
+
+    #[test]
+    fn browser_name_resolution_is_limited_to_loopback_without_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = script(
+            dir.path(),
+            "chromium",
+            r#"printf '%s\n' "$@" > "$(dirname "$0")/args"; exit 4"#,
+        );
+        let rules = |network: bool| {
+            let mut command = dip();
+            command
+                .env("DIP_CHROME_PATH", &path)
+                .args(["embed", "--renderer", "chromium"]);
+            if network {
+                command.arg("--allow-network");
+            }
+            command
+                .arg("-o")
+                .arg(dir.path().join("out.png"))
+                .write_stdin(MODEL)
+                .assert()
+                .code(1);
+            let args = fs::read_to_string(dir.path().join("args")).unwrap();
+            let proxy_disabled = args.lines().any(|line| line == "--no-proxy-server");
+            let rules = args
+                .lines()
+                .filter_map(|line| line.strip_prefix("--host-resolver-rules="))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            (rules, proxy_disabled)
+        };
+        // An inherited proxy would resolve names itself, so it is disabled too.
+        assert_eq!(
+            rules(false),
+            (
+                vec!["MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1".to_owned()],
+                true
+            )
+        );
+        // With network access, only Chrome's own background services are blocked,
+        // and the user's proxy stays available for diagram assets.
+        let (allowed, proxy_disabled) = rules(true);
+        assert_eq!(allowed.len(), 1);
+        assert!(allowed[0].contains("MAP update.googleapis.com ~NOTFOUND"));
+        assert!(!allowed[0].contains("MAP *"));
+        assert!(!proxy_disabled);
     }
 
     #[test]
