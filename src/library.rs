@@ -3,9 +3,17 @@
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use roxmltree::{Document, Node};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    fs,
+    path::Path,
+};
 
-use crate::{document, storage::inflate};
+use crate::{
+    document,
+    storage::{self, inflate},
+};
 
 /// One library entry, as the editor's sidebar shows it.
 pub struct Entry {
@@ -59,23 +67,93 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>> {
         .collect()
 }
 
-/// Selects an entry by exact title, then by a unique case-insensitive title.
-pub fn find<'a>(entries: &'a [Entry], name: &str) -> Result<&'a Entry> {
-    let exact: Vec<_> = entries.iter().filter(|e| e.title == name).collect();
-    let matches = if exact.is_empty() {
-        entries
+/// A library file and its name: the file name without `.xml`.
+pub struct Library {
+    pub name: String,
+    pub entries: Vec<Entry>,
+}
+
+/// Reads one library file.
+pub fn open(path: &Path) -> Result<Library> {
+    let entries = parse(&storage::read(path)?)
+        .with_context(|| format!("invalid library {}", path.display()))?;
+    let file = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match file.len().checked_sub(4) {
+        Some(end) if file[end..].eq_ignore_ascii_case(".xml") => file[..end].to_owned(),
+        _ => file,
+    };
+    Ok(Library { name, entries })
+}
+
+/// Reads the libraries on a search path such as `DIP_LIBRARY_PATH`: files,
+/// and the `*.xml` files directly in directories, in name order. Unreadable
+/// files found in directories are skipped and reported as warnings.
+pub fn search(path: &OsStr) -> Result<(Vec<Library>, Vec<String>)> {
+    let mut libraries = Vec::new();
+    let mut warnings = Vec::new();
+    for item in std::env::split_paths(path) {
+        if item.as_os_str().is_empty() {
+            continue;
+        }
+        if item.is_dir() {
+            let mut files: Vec<_> = fs::read_dir(&item)
+                .with_context(|| format!("cannot read {}", item.display()))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| {
+                    p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("xml"))
+                })
+                .collect();
+            files.sort();
+            for file in files {
+                match open(&file) {
+                    Ok(library) => libraries.push(library),
+                    Err(error) => warnings.push(format!("{error:#}")),
+                }
+            }
+        } else {
+            ensure!(item.is_file(), "library not found: {}", item.display());
+            libraries.push(open(&item)?);
+        }
+    }
+    Ok((libraries, warnings))
+}
+
+/// Selects an entry by exact title, then by a unique case-insensitive title,
+/// across the given libraries.
+pub fn find<'a>(libraries: &'a [Library], name: &str) -> Result<(&'a Library, &'a Entry)> {
+    let matching = |same: &dyn Fn(&str) -> bool| -> Vec<(&'a Library, &'a Entry)> {
+        libraries
             .iter()
-            .filter(|e| e.title.to_lowercase() == name.to_lowercase())
+            .flat_map(|l| l.entries.iter().map(move |e| (l, e)))
+            .filter(|(_, e)| same(&e.title))
             .collect()
+    };
+    let exact = matching(&|title| title == name);
+    let matches = if exact.is_empty() {
+        let lower = name.to_lowercase();
+        matching(&|title| title.to_lowercase() == lower)
     } else {
         exact
     };
-    match matches.as_slice() {
-        [entry] => Ok(entry),
-        [] => bail!("no library entry named {name:?}; see `dip library list --filter`"),
-        _ => bail!(
-            "{} library entries are named {name:?}; use --index",
+    let mut names: Vec<&str> = matches.iter().map(|(l, _)| l.name.as_str()).collect();
+    names.dedup();
+    match (matches.as_slice(), names.as_slice()) {
+        ([found], _) => Ok(*found),
+        ([], _) => bail!("no library entry named {name:?}; see `dip library list --filter`"),
+        (_, [library]) => bail!(
+            "{} entries in library {library:?} are named {name:?}; use --index",
             matches.len()
+        ),
+        _ => bail!(
+            "{name:?} is in libraries {}; use --library",
+            names
+                .iter()
+                .map(|n| format!("{n:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
     }
 }

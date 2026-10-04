@@ -64,7 +64,10 @@ enum Command {
     },
     /// Validate XML or a draw.io PNG (all pages)
     Validate { input: PathBuf },
-    /// Use shapes and icons from a draw.io custom library (<mxlibrary> file)
+    /// Use shapes and icons from draw.io custom libraries (<mxlibrary> files)
+    #[command(
+        after_help = "Library environment:\n  DIP_LIBRARY_PATH  Library files or directories of *.xml files, separated like PATH;\n                    used when no library file is given"
+    )]
     Library {
         #[command(subcommand)]
         command: LibraryCommand,
@@ -73,20 +76,30 @@ enum Command {
 
 #[derive(Subcommand)]
 enum LibraryCommand {
-    /// List entries as index, title and size, without their content
+    /// List entries as library, index, title and size, without their content
     List {
-        library: PathBuf,
+        /// Library file (omit to use DIP_LIBRARY_PATH)
+        #[arg(value_name = "LIBRARY")]
+        file: Option<PathBuf>,
+        /// Only the library with this name (its file name without .xml)
+        #[arg(long, conflicts_with = "file")]
+        library: Option<String>,
         /// Only titles containing this text (case-insensitive)
         #[arg(long)]
         filter: Option<String>,
     },
     /// Add an entry to a page of an uncompressed draw.io XML file; prints the new cell IDs
     Add {
-        library: PathBuf,
+        /// Library file (omit to use DIP_LIBRARY_PATH)
+        #[arg(value_name = "LIBRARY")]
+        file: Option<PathBuf>,
+        /// Only the library with this name (its file name without .xml)
+        #[arg(long, conflicts_with = "file")]
+        library: Option<String>,
         /// Entry title (exact, or a unique case-insensitive match)
         #[arg(long, required_unless_present = "index", conflicts_with = "index")]
         name: Option<String>,
-        /// Entry index as shown by `list` (starting at 1)
+        /// Entry index in its library as shown by `list` (starting at 1)
         #[arg(long)]
         index: Option<usize>,
         /// XML file (omit to read stdin)
@@ -198,31 +211,69 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
+/// The libraries to use: the given file, or those on DIP_LIBRARY_PATH.
+fn libraries(file: Option<PathBuf>, name: Option<&str>) -> Result<Vec<library::Library>> {
+    let libraries = if let Some(file) = file {
+        vec![library::open(&file)?]
+    } else {
+        let path = std::env::var_os("DIP_LIBRARY_PATH")
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("pass a library file or set DIP_LIBRARY_PATH"))?;
+        let (libraries, warnings) = library::search(&path)?;
+        for warning in warnings {
+            eprintln!("warning: skipped {warning}");
+        }
+        libraries
+    };
+    let Some(name) = name else {
+        anyhow::ensure!(
+            !libraries.is_empty(),
+            "no libraries found in DIP_LIBRARY_PATH"
+        );
+        return Ok(libraries);
+    };
+    let available: Vec<_> = libraries.iter().map(|l| l.name.clone()).collect();
+    let selected: Vec<_> = libraries.into_iter().filter(|l| l.name == name).collect();
+    anyhow::ensure!(
+        !selected.is_empty(),
+        "no library named {name:?}; available: {}",
+        available.join(", ")
+    );
+    Ok(selected)
+}
+
 fn library_command(command: LibraryCommand) -> Result<()> {
     match command {
-        LibraryCommand::List { library, filter } => {
-            let entries = library::parse(&storage::read(&library)?)?;
+        LibraryCommand::List {
+            file,
+            library,
+            filter,
+        } => {
+            let libraries = libraries(file, library.as_deref())?;
             let filter = filter.map(|f| f.to_lowercase());
             let mut out = String::new();
-            for (index, entry) in entries.iter().enumerate() {
-                if filter
-                    .as_ref()
-                    .is_some_and(|f| !entry.title.to_lowercase().contains(f))
-                {
-                    continue;
+            for library in &libraries {
+                for (index, entry) in library.entries.iter().enumerate() {
+                    if filter
+                        .as_ref()
+                        .is_some_and(|f| !entry.title.to_lowercase().contains(f))
+                    {
+                        continue;
+                    }
+                    // Titles can contain line breaks; keep one entry per line.
+                    let title: String = entry
+                        .title
+                        .chars()
+                        .map(|c| if c.is_control() { ' ' } else { c })
+                        .collect();
+                    out.push_str(&format!(
+                        "{}\t{}\t{title}\t{}x{}\n",
+                        library.name,
+                        index + 1,
+                        entry.width,
+                        entry.height
+                    ));
                 }
-                // Titles can contain line breaks; keep one entry per line.
-                let title: String = entry
-                    .title
-                    .chars()
-                    .map(|c| if c.is_control() { ' ' } else { c })
-                    .collect();
-                out.push_str(&format!(
-                    "{}\t{title}\t{}x{}\n",
-                    index + 1,
-                    entry.width,
-                    entry.height
-                ));
             }
             // A consumer such as `head` may stop reading early.
             match io::stdout().lock().write_all(out.as_bytes()) {
@@ -231,6 +282,7 @@ fn library_command(command: LibraryCommand) -> Result<()> {
             }
         }
         LibraryCommand::Add {
+            file,
             library,
             name,
             index,
@@ -244,18 +296,24 @@ fn library_command(command: LibraryCommand) -> Result<()> {
             id,
             label,
         } => {
-            let entries = library::parse(&storage::read(&library)?)?;
+            let libraries = libraries(file, library.as_deref())?;
             let entry = match (name, index) {
-                (Some(name), _) => library::find(&entries, &name)?,
-                (None, Some(index)) => index
-                    .checked_sub(1)
-                    .and_then(|i| entries.get(i))
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "library has {} entries; --index starts at 1",
-                            entries.len()
-                        )
-                    })?,
+                (Some(name), _) => library::find(&libraries, &name)?.1,
+                (None, Some(index)) => {
+                    let [library] = libraries.as_slice() else {
+                        anyhow::bail!("--index needs one library; use --library");
+                    };
+                    index
+                        .checked_sub(1)
+                        .and_then(|i| library.entries.get(i))
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "library {:?} has {} entries; --index starts at 1",
+                                library.name,
+                                library.entries.len()
+                            )
+                        })?
+                }
                 (None, None) => unreachable!("clap requires --name or --index"),
             };
             for (flag, value) in [

@@ -45,7 +45,7 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 draw.io のカスタムライブラリ（`<mxlibrary>` 形式の XML。Desktop の「File → Open Library」や VS Code 拡張の `hediet.vscode-drawio.customLibraries` で読み込むファイル）から、図形やアイコンを非圧縮の XML に追加できます。dip はライブラリを同梱・取得しません。ライブラリのファイルは利用者の環境で用意してください。
 
 ```sh
-# 一覧（番号・タイトル・サイズのみ。画像データは出力しない）
+# 一覧（ライブラリ名・番号・タイトル・サイズのみ。画像データは出力しない）
 dip library list simple-icons.xml --filter postgres
 
 # 追加（追加したセルの ID を出力。入力と同じパスに保存可）
@@ -55,7 +55,16 @@ dip library add simple-icons.xml --name PostgreSQL -i diagram.xml -o diagram.xml
 dip embed -i diagram.xml -o diagram.drawio.png
 ```
 
-- `--name` はタイトルの完全一致、なければ大文字小文字を区別しない一意の一致で選びます。同名が複数ある場合は `list` の番号を `--index` で指定します。
+ライブラリのファイルを省略すると `DIP_LIBRARY_PATH` を使います。ファイルまたはディレクトリを `PATH` と同じ区切り（Linux・macOS は `:`、Windows は `;`）で指定し、ディレクトリは直下の `*.xml` を名前順に読みます。ライブラリ名はファイル名から `.xml` を除いたもので、`--library` で絞り込めます。ディレクトリ内の読めないファイルは警告を出して読み飛ばします。
+
+```sh
+export DIP_LIBRARY_PATH="$HOME/.cache/drawio-libraries"
+dip library list --filter github
+#   simple-icons	1123	GitHub	144x144
+dip library add --library simple-icons --name GitHub -i diagram.xml -o diagram.xml --id gh
+```
+
+- `--name` はタイトルの完全一致、なければ大文字小文字を区別しない一意の一致で選びます。複数のライブラリにある場合は `--library` を、同じライブラリに同名が複数ある場合は `list` の番号を `--index`（ライブラリが1つに決まるときのみ）で指定します。
 - 追加する図形は、左上が `--x`・`--y` になるよう移動します。セルの ID は追加先のページで重ならないよう振り直し、`--id` を指定するとそれを使います（複数セルの図形の他のセルは `<ID>-<n>`）。接続線の接続先・グループの親子関係も対応付けます。
 - `--width`・`--height`（片方なら縦横比を維持）は1セルの図形、`--label` は最上位のセルが1つの図形に使えます。ラベルの位置・書式はライブラリの `style` のままです。
 - 追加先は `--page`（1から）の最初のレイヤーです。圧縮ページは展開し、追加後の XML を検証してから保存します。

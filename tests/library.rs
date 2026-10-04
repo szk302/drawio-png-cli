@@ -44,8 +44,11 @@ fn library_xml() -> String {
     format!("<mxlibrary title=\"test\">{text}</mxlibrary>")
 }
 
-fn entries() -> Vec<library::Entry> {
-    library::parse(library_xml().as_bytes()).unwrap()
+fn entries() -> Vec<library::Library> {
+    vec![library::Library {
+        name: "test".into(),
+        entries: library::parse(library_xml().as_bytes()).unwrap(),
+    }]
 }
 
 fn placement(x: f64, y: f64) -> library::Placement<'static> {
@@ -94,7 +97,7 @@ fn list_prints_index_title_and_size_without_content() {
     let text = String::from_utf8(output).unwrap();
     assert_eq!(
         text,
-        "1\tIcon A\t144x72\n2\tGroup B\t200x80\n3\tRaw\t16x8\n4\tLinked\t32x32\n5\tDup\t10x10\n6\tDup\t20x20\n"
+        "lib\t1\tIcon A\t144x72\nlib\t2\tGroup B\t200x80\nlib\t3\tRaw\t16x8\nlib\t4\tLinked\t32x32\nlib\t5\tDup\t10x10\nlib\t6\tDup\t20x20\n"
     );
     assert!(!text.contains("data:"));
     let filtered = dip()
@@ -105,13 +108,16 @@ fn list_prints_index_title_and_size_without_content() {
         .get_output()
         .stdout
         .clone();
-    assert_eq!(String::from_utf8(filtered).unwrap(), "1\tIcon A\t144x72\n");
+    assert_eq!(
+        String::from_utf8(filtered).unwrap(),
+        "lib\t1\tIcon A\t144x72\n"
+    );
 }
 
 #[test]
 fn add_places_resizes_and_labels_a_single_cell() {
     let entries = entries();
-    let entry = library::find(&entries, "icon a").unwrap();
+    let entry = library::find(&entries, "icon a").unwrap().1;
     let mut options = placement(200.0, 30.0);
     options.width = Some(48.0);
     options.id = Some("icon");
@@ -142,7 +148,7 @@ fn add_places_resizes_and_labels_a_single_cell() {
 #[test]
 fn add_remaps_ids_parents_and_edges_of_multi_cell_entries() {
     let entries = entries();
-    let entry = library::find(&entries, "Group\nB").unwrap();
+    let entry = library::find(&entries, "Group\nB").unwrap().1;
     let (xml, ids) = library::add(MODEL, entry, &placement(100.0, 200.0)).unwrap();
     document::validate(&xml).unwrap();
     // Top-level cells first: the group, the object and the edge.
@@ -202,7 +208,7 @@ fn add_remaps_ids_parents_and_edges_of_multi_cell_entries() {
 #[test]
 fn add_turns_image_entries_into_image_cells() {
     let entries = entries();
-    let entry = library::find(&entries, "Raw").unwrap();
+    let entry = library::find(&entries, "Raw").unwrap().1;
     let (xml, ids) = library::add(MODEL, entry, &placement(1.0, 2.0)).unwrap();
     document::validate(&xml).unwrap();
     let doc = roxmltree::Document::parse(&xml).unwrap();
@@ -220,7 +226,7 @@ fn add_turns_image_entries_into_image_cells() {
         (Some("16"), Some("8"))
     );
     // Linked images are kept as URLs; rendering them needs --allow-network.
-    let entry = library::find(&entries, "Linked").unwrap();
+    let entry = library::find(&entries, "Linked").unwrap().1;
     let (xml, ids) = library::add(MODEL, entry, &placement(0.0, 0.0)).unwrap();
     let doc = roxmltree::Document::parse(&xml).unwrap();
     let style = cell(&doc, &ids[0]).attribute("style").unwrap();
@@ -233,7 +239,7 @@ fn add_turns_image_entries_into_image_cells() {
 #[test]
 fn add_targets_pages_and_expands_compressed_ones() {
     let entries = entries();
-    let entry = library::find(&entries, "Icon A").unwrap();
+    let entry = library::find(&entries, "Icon A").unwrap().1;
     for page in [1, 2] {
         let mut options = placement(0.0, 0.0);
         options.page = page;
@@ -262,7 +268,7 @@ fn name_selection_requires_a_unique_match() {
     let entries = entries();
     assert!(library::find(&entries, "Dup").is_err());
     assert!(library::find(&entries, "missing").is_err());
-    assert_eq!(library::find(&entries, "ICON A").unwrap().title, "Icon A");
+    assert_eq!(library::find(&entries, "ICON A").unwrap().1.title, "Icon A");
 }
 
 #[test]
@@ -339,4 +345,114 @@ fn invalid_libraries_are_rejected() {
     let broken = r#"<mxlibrary>[{"xml":"not base64!","title":"x"}]</mxlibrary>"#;
     let entries = library::parse(broken.as_bytes()).unwrap();
     assert!(library::add(MODEL, &entries[0], &placement(0.0, 0.0)).is_err());
+}
+
+#[test]
+fn search_path_finds_libraries_and_selects_by_library_name() {
+    let dir = tempdir().unwrap();
+    let (icons, extra) = (dir.path().join("icons"), dir.path().join("extra"));
+    fs::create_dir_all(&icons).unwrap();
+    fs::create_dir_all(&extra).unwrap();
+    fs::write(icons.join("main.xml"), library_xml()).unwrap();
+    fs::write(icons.join("broken.xml"), "<mxlibrary>not json</mxlibrary>").unwrap();
+    fs::write(icons.join("notes.txt"), "ignored").unwrap();
+    let other = r#"<mxlibrary>[{"xml":"<mxGraphModel><root><mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/><mxCell id=\"2\" vertex=\"1\" parent=\"1\"><mxGeometry width=\"5\" height=\"5\" as=\"geometry\"/></mxCell></root></mxGraphModel>","w":5,"h":5,"title":"Icon A"}]</mxlibrary>"#;
+    fs::write(
+        extra.join("other.xml"),
+        other
+            .replace('<', "&lt;")
+            .replacen("&lt;mxlibrary>", "<mxlibrary>", 1)
+            .replace("&lt;/mxlibrary>", "</mxlibrary>"),
+    )
+    .unwrap();
+    let search = std::env::join_paths([&icons, &extra.join("other.xml")]).unwrap();
+    let run = |args: &[&str]| {
+        let output = dip()
+            .env("DIP_LIBRARY_PATH", &search)
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            String::from_utf8(output.stdout).unwrap(),
+            String::from_utf8(output.stderr).unwrap(),
+        )
+    };
+    // Directories contribute their *.xml files; broken ones are skipped with a warning.
+    let (code, stdout, stderr) = run(&["library", "list", "--filter", "icon"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(stdout, "main\t1\tIcon A\t144x72\nother\t1\tIcon A\t5x5\n");
+    assert!(stderr.contains("warning: skipped invalid library") && stderr.contains("broken.xml"));
+    let (_, stdout, _) = run(&["library", "list", "--library", "other"]);
+    assert_eq!(stdout, "other\t1\tIcon A\t5x5\n");
+    let (code, _, stderr) = run(&["library", "list", "--library", "missing"]);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("available: main, other"), "{stderr}");
+
+    let output = dir.path().join("out.xml");
+    fs::write(&output, MODEL).unwrap();
+    let path = output.to_str().unwrap();
+    // A title in several libraries needs --library; --index needs one library.
+    let (code, _, stderr) = run(&["library", "add", "--name", "Icon A", "-i", path, "-o", path]);
+    assert_eq!(code, Some(1));
+    assert!(
+        stderr.contains(r#""Icon A" is in libraries "main", "other"; use --library"#),
+        "{stderr}"
+    );
+    let (code, _, stderr) = run(&["library", "add", "--index", "1", "-i", path, "-o", path]);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("--index needs one library"), "{stderr}");
+    assert_eq!(fs::read_to_string(&output).unwrap(), MODEL);
+    let (code, stdout, stderr) = run(&[
+        "library",
+        "add",
+        "--library",
+        "other",
+        "--name",
+        "icon a",
+        "--id",
+        "o",
+        "-i",
+        path,
+        "-o",
+        path,
+    ]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(stdout, "o\n");
+    let (code, stdout, _) = run(&[
+        "library",
+        "add",
+        "--library",
+        "main",
+        "--index",
+        "2",
+        "-i",
+        path,
+        "-o",
+        path,
+    ]);
+    assert_eq!(code, Some(0));
+    assert_eq!(stdout.lines().count(), 4);
+    document::validate(&fs::read_to_string(&output).unwrap()).unwrap();
+}
+
+#[test]
+fn library_files_and_names_are_required() {
+    // Without a file, DIP_LIBRARY_PATH is needed; a file excludes --library.
+    let output = dip()
+        .env_remove("DIP_LIBRARY_PATH")
+        .args(["library", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("set DIP_LIBRARY_PATH"));
+    dip()
+        .args(["library", "list", "lib.xml", "--library", "lib"])
+        .assert()
+        .code(2);
+    dip()
+        .env("DIP_LIBRARY_PATH", "/nonexistent/library.xml")
+        .args(["library", "list"])
+        .assert()
+        .code(1);
 }
