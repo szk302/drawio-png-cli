@@ -21,6 +21,12 @@ struct Cli {
 enum Command {
     /// Print licenses and notices for dip, dependencies, and bundled assets
     Licenses,
+    /// Print the agent skill guide for this version of dip (vscode mode)
+    Skill {
+        /// Print the full reference instead (Desktop, raw and desktop modes, fonts, --no-render)
+        #[arg(long)]
+        full: bool,
+    },
     /// Extract editable, uncompressed XML from a draw.io PNG
     Extract {
         input: PathBuf,
@@ -152,6 +158,11 @@ enum LibraryCommand {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Skill { full } => print(if full {
+            include_str!("../assets/skill/drawio-png-full.md")
+        } else {
+            include_str!("../assets/skill/drawio-png.md")
+        })?,
         Command::Licenses => {
             io::stdout()
                 .lock()

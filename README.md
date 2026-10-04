@@ -61,6 +61,17 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 
 `--base-image` は `--no-render` と組み合わせます。`--no-render` は画像と XML の見た目が同期されない旨を警告します。ベース画像を指定しない場合、既存の出力 PNG の画像は再利用しません。
 
+## AI エージェント向けスキル
+
+`skills/drawio-png/` は、Claude Code などの AI エージェントに dip の使い方を教えるスキルです。中身は案内だけで、手順の本文は dip に同梱しており、`dip skill`（基本の手順、vscode モード）と `dip skill --full`（全機能）で出力します。手順は常にインストールされている dip の版と一致します。
+
+```sh
+# 対応するエージェントへまとめてインストール（Vercel Labs の skills CLI）
+npx skills add szk302/drawio-png-cli
+# または Claude Code へ手動で配置
+mkdir -p ~/.claude/skills && cp -r skills/drawio-png ~/.claude/skills/
+```
+
 ## カスタムライブラリの図形を挿入
 
 draw.io のカスタムライブラリ（`<mxlibrary>` 形式の XML。Desktop の「File → Open Library」や VS Code 拡張の `hediet.vscode-drawio.customLibraries` で読み込むファイル）の図形・アイコン（エントリー）を、非圧縮の XML に挿入できます。dip はライブラリを同梱・取得しません。ライブラリのファイルは利用者の環境で用意し、`DIP_LIBRARY_PATH` で指定します。
