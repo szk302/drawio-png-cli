@@ -47,6 +47,8 @@ fn library_xml() -> String {
 fn entries() -> Vec<library::Library> {
     vec![library::Library {
         name: "test".into(),
+        title: Some("test".into()),
+        path: "lib.xml".into(),
         entries: library::parse(library_xml().as_bytes()).unwrap(),
     }]
 }
@@ -82,47 +84,55 @@ fn geometry<'a>(node: roxmltree::Node<'a, 'a>) -> roxmltree::Node<'a, 'a> {
 }
 
 #[test]
-fn list_prints_index_title_and_size_without_content() {
+fn library_commands_print_libraries_details_and_entries() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("lib.xml");
     fs::write(&path, library_xml()).unwrap();
-    let output = dip()
-        .args(["library", "list"])
-        .arg(&path)
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let text = String::from_utf8(output).unwrap();
+    let run = |args: &[&str]| {
+        let output = dip()
+            .env_remove("DIP_LIBRARY_PATH")
+            .args(args)
+            .arg("--library-file")
+            .arg(&path)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).unwrap()
+    };
+    // Libraries: name, entry count and the <mxlibrary> title.
+    assert_eq!(run(&["library", "list"]), "lib\t6\ttest\n");
+    assert_eq!(run(&["library", "ls"]), "lib\t6\ttest\n");
     assert_eq!(
-        text,
+        run(&["library", "show", "lib"]),
+        format!(
+            "name: lib\ntitle: test\nfile: {}\nentries: 6\n",
+            path.display()
+        )
+    );
+    // Entries: library, index, title and size; never the content.
+    let all = run(&["library", "search"]);
+    assert_eq!(
+        all,
         "lib\t1\tIcon A\t144x72\nlib\t2\tGroup B\t200x80\nlib\t3\tRaw\t16x8\nlib\t4\tLinked\t32x32\nlib\t5\tDup\t10x10\nlib\t6\tDup\t20x20\n"
     );
-    assert!(!text.contains("data:"));
-    let filtered = dip()
-        .args(["library", "list", "--filter", "ICON"])
-        .arg(&path)
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+    assert!(!all.contains("data:"));
     assert_eq!(
-        String::from_utf8(filtered).unwrap(),
+        run(&["library", "search", "ICON"]),
         "lib\t1\tIcon A\t144x72\n"
     );
 }
 
 #[test]
-fn add_places_resizes_and_labels_a_single_cell() {
+fn insert_places_resizes_and_labels_a_single_cell() {
     let entries = entries();
     let entry = library::find(&entries, "icon a").unwrap().1;
     let mut options = placement(200.0, 30.0);
     options.width = Some(48.0);
     options.id = Some("icon");
     options.label = Some("Label & <b>");
-    let (xml, ids) = library::add(MODEL, entry, &options).unwrap();
+    let (xml, ids) = library::insert(MODEL, entry, &options).unwrap();
     assert_eq!(ids, ["icon"]);
     document::validate(&xml).unwrap();
     let doc = roxmltree::Document::parse(&xml).unwrap();
@@ -146,10 +156,10 @@ fn add_places_resizes_and_labels_a_single_cell() {
 }
 
 #[test]
-fn add_remaps_ids_parents_and_edges_of_multi_cell_entries() {
+fn insert_remaps_ids_parents_and_edges_of_multi_cell_entries() {
     let entries = entries();
     let entry = library::find(&entries, "Group\nB").unwrap().1;
-    let (xml, ids) = library::add(MODEL, entry, &placement(100.0, 200.0)).unwrap();
+    let (xml, ids) = library::insert(MODEL, entry, &placement(100.0, 200.0)).unwrap();
     document::validate(&xml).unwrap();
     // Top-level cells first: the group, the object and the edge.
     assert_eq!(ids, ["lib-1", "lib-3", "lib-4", "lib-2"]);
@@ -193,23 +203,23 @@ fn add_remaps_ids_parents_and_edges_of_multi_cell_entries() {
         ]
     );
     // A second add gets fresh IDs.
-    let (again, ids) = library::add(&xml, entry, &placement(0.0, 0.0)).unwrap();
+    let (again, ids) = library::insert(&xml, entry, &placement(0.0, 0.0)).unwrap();
     document::validate(&again).unwrap();
     assert_eq!(ids, ["lib-5", "lib-7", "lib-8", "lib-6"]);
     // Labels and sizes need a single cell.
     let mut options = placement(0.0, 0.0);
     options.label = Some("x");
-    assert!(library::add(MODEL, entry, &options).is_err());
+    assert!(library::insert(MODEL, entry, &options).is_err());
     let mut options = placement(0.0, 0.0);
     options.width = Some(10.0);
-    assert!(library::add(MODEL, entry, &options).is_err());
+    assert!(library::insert(MODEL, entry, &options).is_err());
 }
 
 #[test]
-fn add_turns_image_entries_into_image_cells() {
+fn insert_turns_image_entries_into_image_cells() {
     let entries = entries();
     let entry = library::find(&entries, "Raw").unwrap().1;
-    let (xml, ids) = library::add(MODEL, entry, &placement(1.0, 2.0)).unwrap();
+    let (xml, ids) = library::insert(MODEL, entry, &placement(1.0, 2.0)).unwrap();
     document::validate(&xml).unwrap();
     let doc = roxmltree::Document::parse(&xml).unwrap();
     let image = cell(&doc, &ids[0]);
@@ -227,7 +237,7 @@ fn add_turns_image_entries_into_image_cells() {
     );
     // Linked images are kept as URLs; rendering them needs --allow-network.
     let entry = library::find(&entries, "Linked").unwrap().1;
-    let (xml, ids) = library::add(MODEL, entry, &placement(0.0, 0.0)).unwrap();
+    let (xml, ids) = library::insert(MODEL, entry, &placement(0.0, 0.0)).unwrap();
     let doc = roxmltree::Document::parse(&xml).unwrap();
     let style = cell(&doc, &ids[0]).attribute("style").unwrap();
     assert!(
@@ -237,13 +247,13 @@ fn add_turns_image_entries_into_image_cells() {
 }
 
 #[test]
-fn add_targets_pages_and_expands_compressed_ones() {
+fn insert_targets_pages_and_expands_compressed_ones() {
     let entries = entries();
     let entry = library::find(&entries, "Icon A").unwrap().1;
     for page in [1, 2] {
         let mut options = placement(0.0, 0.0);
         options.page = page;
-        let (xml, ids) = library::add(MIXED, entry, &options).unwrap();
+        let (xml, ids) = library::insert(MIXED, entry, &options).unwrap();
         document::validate(&xml).unwrap();
         let doc = roxmltree::Document::parse(&xml).unwrap();
         let pages: Vec<_> = doc
@@ -260,7 +270,7 @@ fn add_targets_pages_and_expands_compressed_ones() {
     }
     let mut options = placement(0.0, 0.0);
     options.page = 3;
-    assert!(library::add(MIXED, entry, &options).is_err());
+    assert!(library::insert(MIXED, entry, &options).is_err());
 }
 
 #[test]
@@ -272,13 +282,14 @@ fn name_selection_requires_a_unique_match() {
 }
 
 #[test]
-fn cli_add_prints_ids_and_keeps_output_on_errors() {
+fn cli_insert_prints_ids_and_keeps_output_on_errors() {
     let dir = tempdir().unwrap();
     let lib = dir.path().join("lib.xml");
     fs::write(&lib, library_xml()).unwrap();
     let output = dir.path().join("out.xml");
     let result = dip()
-        .args(["library", "add"])
+        .arg("insert")
+        .arg("--library-file")
         .arg(&lib)
         .args(["--name", "Icon A", "--id", "icon", "--x", "5", "-o"])
         .arg(&output)
@@ -298,7 +309,8 @@ fn cli_add_prints_ids_and_keeps_output_on_errors() {
         vec!["--index", "1", "--width", "0"],
     ] {
         dip()
-            .args(["library", "add"])
+            .arg("insert")
+            .arg("--library-file")
             .arg(&lib)
             .args(&args)
             .arg("-i")
@@ -310,7 +322,8 @@ fn cli_add_prints_ids_and_keeps_output_on_errors() {
         assert_eq!(fs::read(&output).unwrap(), saved, "{args:?}");
     }
     dip()
-        .args(["library", "add"])
+        .arg("insert")
+        .arg("--library-file")
         .arg(&lib)
         .args(["--name", "Icon A", "--index", "1", "-o"])
         .arg(&output)
@@ -318,7 +331,8 @@ fn cli_add_prints_ids_and_keeps_output_on_errors() {
         .code(2);
     // The entry content never reaches stdout.
     let list = dip()
-        .args(["library", "add"])
+        .arg("insert")
+        .arg("--library-file")
         .arg(&lib)
         .args(["--index", "3", "-i"])
         .arg(&output)
@@ -344,7 +358,7 @@ fn invalid_libraries_are_rejected() {
     }
     let broken = r#"<mxlibrary>[{"xml":"not base64!","title":"x"}]</mxlibrary>"#;
     let entries = library::parse(broken.as_bytes()).unwrap();
-    assert!(library::add(MODEL, &entries[0], &placement(0.0, 0.0)).is_err());
+    assert!(library::insert(MODEL, &entries[0], &placement(0.0, 0.0)).is_err());
 }
 
 #[test]
@@ -379,13 +393,16 @@ fn search_path_finds_libraries_and_selects_by_library_name() {
         )
     };
     // Directories contribute their *.xml files; broken ones are skipped with a warning.
-    let (code, stdout, stderr) = run(&["library", "list", "--filter", "icon"]);
+    let (code, stdout, stderr) = run(&["library", "list"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(stdout, "main\t6\ttest\nother\t1\t-\n");
+    let (code, stdout, stderr) = run(&["library", "search", "icon"]);
     assert_eq!(code, Some(0), "{stderr}");
     assert_eq!(stdout, "main\t1\tIcon A\t144x72\nother\t1\tIcon A\t5x5\n");
     assert!(stderr.contains("warning: skipped invalid library") && stderr.contains("broken.xml"));
-    let (_, stdout, _) = run(&["library", "list", "--library", "other"]);
+    let (_, stdout, _) = run(&["library", "search", "--library", "other"]);
     assert_eq!(stdout, "other\t1\tIcon A\t5x5\n");
-    let (code, _, stderr) = run(&["library", "list", "--library", "missing"]);
+    let (code, _, stderr) = run(&["library", "show", "missing"]);
     assert_eq!(code, Some(1));
     assert!(stderr.contains("available: main, other"), "{stderr}");
 
@@ -393,19 +410,18 @@ fn search_path_finds_libraries_and_selects_by_library_name() {
     fs::write(&output, MODEL).unwrap();
     let path = output.to_str().unwrap();
     // A title in several libraries needs --library; --index needs one library.
-    let (code, _, stderr) = run(&["library", "add", "--name", "Icon A", "-i", path, "-o", path]);
+    let (code, _, stderr) = run(&["insert", "--name", "Icon A", "-i", path, "-o", path]);
     assert_eq!(code, Some(1));
     assert!(
         stderr.contains(r#""Icon A" is in libraries "main", "other"; use --library"#),
         "{stderr}"
     );
-    let (code, _, stderr) = run(&["library", "add", "--index", "1", "-i", path, "-o", path]);
+    let (code, _, stderr) = run(&["insert", "--index", "1", "-i", path, "-o", path]);
     assert_eq!(code, Some(1));
     assert!(stderr.contains("--index needs one library"), "{stderr}");
     assert_eq!(fs::read_to_string(&output).unwrap(), MODEL);
     let (code, stdout, stderr) = run(&[
-        "library",
-        "add",
+        "insert",
         "--library",
         "other",
         "--name",
@@ -420,8 +436,7 @@ fn search_path_finds_libraries_and_selects_by_library_name() {
     assert_eq!(code, Some(0), "{stderr}");
     assert_eq!(stdout, "o\n");
     let (code, stdout, _) = run(&[
-        "library",
-        "add",
+        "insert",
         "--library",
         "main",
         "--index",
@@ -447,7 +462,14 @@ fn library_files_and_names_are_required() {
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("set DIP_LIBRARY_PATH"));
     dip()
-        .args(["library", "list", "lib.xml", "--library", "lib"])
+        .args([
+            "library",
+            "search",
+            "--library-file",
+            "lib.xml",
+            "--library",
+            "lib",
+        ])
         .assert()
         .code(2);
     dip()

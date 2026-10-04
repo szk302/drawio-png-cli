@@ -64,42 +64,15 @@ enum Command {
     },
     /// Validate XML or a draw.io PNG (all pages)
     Validate { input: PathBuf },
-    /// Use shapes and icons from draw.io custom libraries (<mxlibrary> files)
-    #[command(
-        after_help = "Library environment:\n  DIP_LIBRARY_PATH  Library files or directories of *.xml files, separated like PATH;\n                    used when no library file is given"
-    )]
-    Library {
-        #[command(subcommand)]
-        command: LibraryCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum LibraryCommand {
-    /// List entries as library, index, title and size, without their content
-    List {
-        /// Library file (omit to use DIP_LIBRARY_PATH)
-        #[arg(value_name = "LIBRARY")]
-        file: Option<PathBuf>,
-        /// Only the library with this name (its file name without .xml)
-        #[arg(long, conflicts_with = "file")]
-        library: Option<String>,
-        /// Only titles containing this text (case-insensitive)
-        #[arg(long)]
-        filter: Option<String>,
-    },
-    /// Add an entry to a page of an uncompressed draw.io XML file; prints the new cell IDs
-    Add {
-        /// Library file (omit to use DIP_LIBRARY_PATH)
-        #[arg(value_name = "LIBRARY")]
-        file: Option<PathBuf>,
-        /// Only the library with this name (its file name without .xml)
-        #[arg(long, conflicts_with = "file")]
-        library: Option<String>,
+    /// Insert a library entry into a page of an uncompressed draw.io XML file; prints the new cell IDs
+    #[command(after_help = LIBRARY_ENV)]
+    Insert {
+        #[command(flatten)]
+        source: LibrarySource,
         /// Entry title (exact, or a unique case-insensitive match)
         #[arg(long, required_unless_present = "index", conflicts_with = "index")]
         name: Option<String>,
-        /// Entry index in its library as shown by `list` (starting at 1)
+        /// Entry index in its library as shown by `library search` (starting at 1)
         #[arg(long)]
         index: Option<usize>,
         /// XML file (omit to read stdin)
@@ -110,10 +83,10 @@ enum LibraryCommand {
         /// Page number, starting at 1
         #[arg(long, default_value_t = 1)]
         page: usize,
-        /// Left edge of the added shapes
+        /// Left edge of the inserted shapes
         #[arg(long, default_value_t = 0.0)]
         x: f64,
-        /// Top edge of the added shapes
+        /// Top edge of the inserted shapes
         #[arg(long, default_value_t = 0.0)]
         y: f64,
         /// Width of a single-cell entry (keeps the aspect ratio if --height is omitted)
@@ -128,6 +101,52 @@ enum LibraryCommand {
         /// Label of the top-level cell
         #[arg(long)]
         label: Option<String>,
+    },
+    /// Inspect draw.io custom libraries (<mxlibrary> files) without changing anything
+    Library {
+        #[command(subcommand)]
+        command: LibraryCommand,
+    },
+}
+
+const LIBRARY_ENV: &str = "Library environment:\n  DIP_LIBRARY_PATH  Library files or directories of *.xml files, separated like PATH;\n                    used unless --library-file is given";
+
+/// Which libraries to use.
+#[derive(clap::Args)]
+struct LibrarySource {
+    /// Library name: its file name without .xml
+    #[arg(long)]
+    library: Option<String>,
+    /// Library file to use instead of DIP_LIBRARY_PATH
+    #[arg(long, value_name = "PATH", conflicts_with = "library")]
+    library_file: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum LibraryCommand {
+    /// List libraries as name, entry count and title
+    #[command(visible_alias = "ls", after_help = LIBRARY_ENV)]
+    List {
+        /// Library file to use instead of DIP_LIBRARY_PATH
+        #[arg(long, value_name = "PATH")]
+        library_file: Option<PathBuf>,
+    },
+    /// Show details of one library
+    #[command(after_help = LIBRARY_ENV)]
+    Show {
+        /// Library name: its file name without .xml
+        name: String,
+        /// Library file to use instead of DIP_LIBRARY_PATH
+        #[arg(long, value_name = "PATH")]
+        library_file: Option<PathBuf>,
+    },
+    /// Search entries; prints library, index, title and size, without their content
+    #[command(after_help = LIBRARY_ENV)]
+    Search {
+        /// Text the title must contain (case-insensitive); omit to list every entry
+        query: Option<String>,
+        #[command(flatten)]
+        source: LibrarySource,
     },
 }
 
@@ -207,18 +226,48 @@ fn run(cli: Cli) -> Result<()> {
             document::validate(&xml)?;
         }
         Command::Library { command } => library_command(command)?,
+        Command::Insert {
+            source,
+            name,
+            index,
+            input,
+            output,
+            page,
+            x,
+            y,
+            width,
+            height,
+            id,
+            label,
+        } => insert(
+            source,
+            name,
+            index,
+            input,
+            output,
+            library::Placement {
+                page,
+                x,
+                y,
+                width,
+                height,
+                id: id.as_deref(),
+                label: label.as_deref(),
+            },
+        )?,
     }
     Ok(())
 }
 
-/// The libraries to use: the given file, or those on DIP_LIBRARY_PATH.
+/// The libraries to use: the given file, or those on DIP_LIBRARY_PATH,
+/// optionally only the one with the given name.
 fn libraries(file: Option<PathBuf>, name: Option<&str>) -> Result<Vec<library::Library>> {
     let libraries = if let Some(file) = file {
         vec![library::open(&file)?]
     } else {
         let path = std::env::var_os("DIP_LIBRARY_PATH")
             .filter(|p| !p.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("pass a library file or set DIP_LIBRARY_PATH"))?;
+            .ok_or_else(|| anyhow::anyhow!("set DIP_LIBRARY_PATH or pass --library-file"))?;
         let (libraries, warnings) = library::search(&path)?;
         for warning in warnings {
             eprintln!("warning: skipped {warning}");
@@ -242,120 +291,120 @@ fn libraries(file: Option<PathBuf>, name: Option<&str>) -> Result<Vec<library::L
     Ok(selected)
 }
 
+/// Keeps one record per line.
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+/// Writes to stdout; a consumer such as `head` may stop reading early.
+fn print(text: &str) -> Result<()> {
+    match io::stdout().lock().write_all(text.as_bytes()) {
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => Ok(other?),
+    }
+}
+
 fn library_command(command: LibraryCommand) -> Result<()> {
+    let mut out = String::new();
     match command {
-        LibraryCommand::List {
-            file,
-            library,
-            filter,
-        } => {
-            let libraries = libraries(file, library.as_deref())?;
-            let filter = filter.map(|f| f.to_lowercase());
-            let mut out = String::new();
-            for library in &libraries {
+        LibraryCommand::List { library_file } => {
+            for library in libraries(library_file, None)? {
+                out.push_str(&format!(
+                    "{}\t{}\t{}\n",
+                    library.name,
+                    library.entries.len(),
+                    library.title.as_deref().map_or("-".into(), one_line)
+                ));
+            }
+        }
+        LibraryCommand::Show { name, library_file } => {
+            for library in libraries(library_file, Some(&name))? {
+                out.push_str(&format!(
+                    "name: {}\ntitle: {}\nfile: {}\nentries: {}\n",
+                    library.name,
+                    library.title.as_deref().map_or("-".into(), one_line),
+                    library.path.display(),
+                    library.entries.len()
+                ));
+            }
+        }
+        LibraryCommand::Search { query, source } => {
+            let query = query.map(|q| q.to_lowercase());
+            for library in libraries(source.library_file, source.library.as_deref())? {
                 for (index, entry) in library.entries.iter().enumerate() {
-                    if filter
+                    if query
                         .as_ref()
-                        .is_some_and(|f| !entry.title.to_lowercase().contains(f))
+                        .is_some_and(|q| !entry.title.to_lowercase().contains(q))
                     {
                         continue;
                     }
-                    // Titles can contain line breaks; keep one entry per line.
-                    let title: String = entry
-                        .title
-                        .chars()
-                        .map(|c| if c.is_control() { ' ' } else { c })
-                        .collect();
                     out.push_str(&format!(
-                        "{}\t{}\t{title}\t{}x{}\n",
+                        "{}\t{}\t{}\t{}x{}\n",
                         library.name,
                         index + 1,
+                        one_line(&entry.title),
                         entry.width,
                         entry.height
                     ));
                 }
             }
-            // A consumer such as `head` may stop reading early.
-            match io::stdout().lock().write_all(out.as_bytes()) {
-                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {}
-                other => other?,
-            }
-        }
-        LibraryCommand::Add {
-            file,
-            library,
-            name,
-            index,
-            input,
-            output,
-            page,
-            x,
-            y,
-            width,
-            height,
-            id,
-            label,
-        } => {
-            let libraries = libraries(file, library.as_deref())?;
-            let entry = match (name, index) {
-                (Some(name), _) => library::find(&libraries, &name)?.1,
-                (None, Some(index)) => {
-                    let [library] = libraries.as_slice() else {
-                        anyhow::bail!("--index needs one library; use --library");
-                    };
-                    index
-                        .checked_sub(1)
-                        .and_then(|i| library.entries.get(i))
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "library {:?} has {} entries; --index starts at 1",
-                                library.name,
-                                library.entries.len()
-                            )
-                        })?
-                }
-                (None, None) => unreachable!("clap requires --name or --index"),
-            };
-            for (flag, value) in [
-                ("--x", Some(x)),
-                ("--y", Some(y)),
-                ("--width", width),
-                ("--height", height),
-            ] {
-                anyhow::ensure!(
-                    value.is_none_or(f64::is_finite),
-                    "{flag} must be a finite number"
-                );
-            }
-            for (flag, value) in [("--width", width), ("--height", height)] {
-                anyhow::ensure!(value.is_none_or(|v| v > 0.0), "{flag} must be positive");
-            }
-            let bytes = if let Some(path) = input {
-                storage::read(&path)?
-            } else {
-                storage::read_limited(io::stdin().lock())?
-            };
-            let (xml, ids) = library::add(
-                document::utf8(&bytes)?,
-                entry,
-                &library::Placement {
-                    page,
-                    x,
-                    y,
-                    width,
-                    height,
-                    id: id.as_deref(),
-                    label: label.as_deref(),
-                },
-            )?;
-            storage::atomic_write(&output, xml.as_bytes())?;
-            let mut out = io::stdout().lock();
-            for id in ids {
-                writeln!(out, "{id}")?;
-            }
         }
     }
-    Ok(())
+    print(&out)
+}
+
+fn insert(
+    source: LibrarySource,
+    name: Option<String>,
+    index: Option<usize>,
+    input: Option<PathBuf>,
+    output: PathBuf,
+    placement: library::Placement<'_>,
+) -> Result<()> {
+    let libraries = libraries(source.library_file, source.library.as_deref())?;
+    let entry = match (name, index) {
+        (Some(name), _) => library::find(&libraries, &name)?.1,
+        (None, Some(index)) => {
+            let [library] = libraries.as_slice() else {
+                anyhow::bail!("--index needs one library; use --library");
+            };
+            index
+                .checked_sub(1)
+                .and_then(|i| library.entries.get(i))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "library {:?} has {} entries; --index starts at 1",
+                        library.name,
+                        library.entries.len()
+                    )
+                })?
+        }
+        (None, None) => unreachable!("clap requires --name or --index"),
+    };
+    for (flag, value) in [
+        ("--x", Some(placement.x)),
+        ("--y", Some(placement.y)),
+        ("--width", placement.width),
+        ("--height", placement.height),
+    ] {
+        anyhow::ensure!(
+            value.is_none_or(f64::is_finite),
+            "{flag} must be a finite number"
+        );
+    }
+    for (flag, value) in [("--width", placement.width), ("--height", placement.height)] {
+        anyhow::ensure!(value.is_none_or(|v| v > 0.0), "{flag} must be positive");
+    }
+    let bytes = if let Some(path) = input {
+        storage::read(&path)?
+    } else {
+        storage::read_limited(io::stdin().lock())?
+    };
+    let (xml, ids) = library::insert(document::utf8(&bytes)?, entry, &placement)?;
+    storage::atomic_write(&output, xml.as_bytes())?;
+    print(&ids.iter().map(|id| format!("{id}\n")).collect::<String>())
 }
 
 fn main() -> std::process::ExitCode {

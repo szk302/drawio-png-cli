@@ -7,7 +7,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use crate::{
@@ -32,6 +32,11 @@ enum Content {
 
 /// Parses an `<mxlibrary>` file.
 pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>> {
+    Ok(parse_library(bytes)?.1)
+}
+
+/// Parses an `<mxlibrary>` file into its optional title and its entries.
+fn parse_library(bytes: &[u8]) -> Result<(Option<String>, Vec<Entry>)> {
     let text = document::utf8(bytes)?;
     let doc = document::parse(text)?;
     let root = doc.root_element();
@@ -39,10 +44,15 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>> {
         root.has_tag_name("mxlibrary"),
         "library root must be <mxlibrary>"
     );
+    let title = root
+        .attribute("title")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned);
     let json: String = root.children().filter_map(|n| n.text()).collect();
     let items: Vec<serde_json::Value> =
         serde_json::from_str(json.trim()).context("invalid library JSON")?;
-    items
+    let entries = items
         .iter()
         .enumerate()
         .map(|(index, item)| {
@@ -64,18 +74,22 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>> {
                 content,
             })
         })
-        .collect()
+        .collect::<Result<_>>()?;
+    Ok((title, entries))
 }
 
-/// A library file and its name: the file name without `.xml`.
+/// A library file. Its name is the file name without `.xml`; the optional
+/// title is the `<mxlibrary title>` that draw.io shows instead.
 pub struct Library {
     pub name: String,
+    pub title: Option<String>,
+    pub path: PathBuf,
     pub entries: Vec<Entry>,
 }
 
 /// Reads one library file.
 pub fn open(path: &Path) -> Result<Library> {
-    let entries = parse(&storage::read(path)?)
+    let (title, entries) = parse_library(&storage::read(path)?)
         .with_context(|| format!("invalid library {}", path.display()))?;
     let file = path
         .file_name()
@@ -85,7 +99,12 @@ pub fn open(path: &Path) -> Result<Library> {
         Some(end) if file[end..].eq_ignore_ascii_case(".xml") => file[..end].to_owned(),
         _ => file,
     };
-    Ok(Library { name, entries })
+    Ok(Library {
+        name,
+        title,
+        path: path.to_owned(),
+        entries,
+    })
 }
 
 /// Reads the libraries on a search path such as `DIP_LIBRARY_PATH`: files,
@@ -142,7 +161,7 @@ pub fn find<'a>(libraries: &'a [Library], name: &str) -> Result<(&'a Library, &'
     names.dedup();
     match (matches.as_slice(), names.as_slice()) {
         ([found], _) => Ok(*found),
-        ([], _) => bail!("no library entry named {name:?}; see `dip library list --filter`"),
+        ([], _) => bail!("no library entry named {name:?}; see `dip library search`"),
         (_, [library]) => bail!(
             "{} entries in library {library:?} are named {name:?}; use --index",
             matches.len()
@@ -170,9 +189,13 @@ pub struct Placement<'a> {
     pub label: Option<&'a str>,
 }
 
-/// Adds `entry` to a page of `xml`. Returns the expanded document and the new
+/// Inserts `entry` into a page of `xml`. Returns the expanded document and the new
 /// cell IDs, the top-level cells first.
-pub fn add(xml: &str, entry: &Entry, placement: &Placement<'_>) -> Result<(String, Vec<String>)> {
+pub fn insert(
+    xml: &str,
+    entry: &Entry,
+    placement: &Placement<'_>,
+) -> Result<(String, Vec<String>)> {
     let xml = document::normalize(xml)?;
     let model = entry_model(entry)?;
     let source = document::parse(&model).context("invalid library entry")?;
