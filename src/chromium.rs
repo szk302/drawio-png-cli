@@ -1,7 +1,7 @@
 //! Headless Chromium controlled directly through the Chrome DevTools Protocol.
 use crate::{
     MAX_BYTES,
-    chromium_assets::AssetServer,
+    chromium_assets::{AssetServer, AssetStore},
     png_data,
     render::{ChildGuard, TIMEOUT, executable, log_excerpt},
     resample,
@@ -307,7 +307,7 @@ pub fn render_with_mode(
             next_id: 0,
             session: None,
             deadline,
-            origin: server.origin.clone(),
+            assets: server.store.clone(),
             allow_network,
             transferred: 0,
             log: log.try_clone()?,
@@ -341,7 +341,7 @@ pub fn render_with_mode(
         )?;
         let navigation = cdp.call(
             "Page.navigate",
-            json!({"url": format!("{}/export3.html", server.origin)}),
+            json!({"url": format!("{}/export3.html", cdp.assets.origin)}),
         )?;
         ensure!(
             navigation.get("errorText").is_none(),
@@ -365,7 +365,7 @@ pub fn render_with_mode(
         let rendered = cdp.call("Runtime.callFunctionOn", json!({
             "objectId":window["result"]["objectId"],
             "functionDeclaration":format!("function(xml, bundled, mode, preload) {{ {} return dipRender(xml, bundled, mode, preload); }}", include_str!("../assets/chromium-render.js")),
-            "arguments":[{"value":xml},{"value":server.bundled},{"value":mode.name()},{"value":server.preload}],
+            "arguments":[{"value":xml},{"value":cdp.assets.bundled},{"value":mode.name()},{"value":cdp.assets.preload}],
             "returnByValue":true, "awaitPromise":true
         }))?;
         ensure!(
@@ -472,7 +472,7 @@ struct Cdp {
     next_id: u64,
     session: Option<String>,
     deadline: Instant,
-    origin: String,
+    assets: std::sync::Arc<AssetStore>,
     allow_network: bool,
     transferred: u64,
     log: fs::File,
@@ -530,7 +530,25 @@ impl Cdp {
         match event["method"].as_str().unwrap_or("") {
             "Fetch.requestPaused" => {
                 let url = params["request"]["url"].as_str().unwrap_or("");
-                let local = url.starts_with(&format!("{}/", self.origin));
+                let method = params["request"]["method"].as_str().unwrap_or("GET");
+                // The document itself loads over loopback HTTP; see AssetServer.
+                let document = params["resourceType"].as_str() == Some("Document");
+                if let Some(asset) = (!document)
+                    .then(|| self.assets.respond(method, url))
+                    .flatten()
+                {
+                    let headers: Vec<Value> = asset
+                        .headers
+                        .iter()
+                        .map(|(name, value)| json!({"name":name,"value":value}))
+                        .collect();
+                    self.send(
+                        "Fetch.fulfillRequest",
+                        json!({"requestId":params["requestId"],"responseCode":asset.status,"responseHeaders":headers,"body":STANDARD.encode(&asset.body)}),
+                    )?;
+                    return Ok(());
+                }
+                let local = url.starts_with(&format!("{}/", self.assets.origin));
                 let allowed = local
                     || url.starts_with("data:")
                     || url.starts_with("blob:")
