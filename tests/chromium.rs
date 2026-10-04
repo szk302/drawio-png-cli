@@ -845,6 +845,45 @@ mod unix {
     }
 
     #[test]
+    fn browser_name_resolution_is_limited_to_loopback_without_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = script(
+            dir.path(),
+            "chromium",
+            r#"printf '%s\n' "$@" > "$(dirname "$0")/args"; exit 4"#,
+        );
+        let rules = |network: bool| {
+            let mut command = dip();
+            command
+                .env("DIP_CHROME_PATH", &path)
+                .args(["embed", "--renderer", "chromium"]);
+            if network {
+                command.arg("--allow-network");
+            }
+            command
+                .arg("-o")
+                .arg(dir.path().join("out.png"))
+                .write_stdin(MODEL)
+                .assert()
+                .code(1);
+            let args = fs::read_to_string(dir.path().join("args")).unwrap();
+            args.lines()
+                .filter_map(|line| line.strip_prefix("--host-resolver-rules="))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rules(false),
+            ["MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"]
+        );
+        // With network access, only Chrome's own background services are blocked.
+        let allowed = rules(true);
+        assert_eq!(allowed.len(), 1);
+        assert!(allowed[0].contains("MAP update.googleapis.com ~NOTFOUND"));
+        assert!(!allowed[0].contains("MAP *"));
+    }
+
+    #[test]
     fn browser_options_are_literal_and_invalid_options_never_launch() {
         let dir = tempfile::tempdir().unwrap();
         let path = script(

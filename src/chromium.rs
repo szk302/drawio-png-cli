@@ -102,6 +102,39 @@ fn standard_paths(os: &str, var: impl Fn(&str) -> Option<OsString>) -> Vec<PathB
     chrome
 }
 
+/// Chrome's own services (Google Chrome in particular) connect to Google even
+/// with --disable-background-networking: component updates, optimization guide
+/// models, push messaging, accounts. Fetch interception only sees the page's
+/// requests, so stop these at name resolution. Without --allow-network nothing
+/// but loopback resolves; with it, only the known service hosts are blocked so
+/// diagram images and fonts from any other host still load.
+const CHROME_SERVICE_HOSTS: &[&str] = &[
+    "accounts.google.com",
+    "android.clients.google.com",
+    "clients2.google.com",
+    "clientservices.googleapis.com",
+    "content-autofill.googleapis.com",
+    "edgedl.me.gvt1.com",
+    "mtalk.google.com",
+    "optimizationguide-pa.googleapis.com",
+    "safebrowsing.googleapis.com",
+    "update.googleapis.com",
+];
+
+fn host_resolver_rules(allow_network: bool) -> String {
+    let rules = if allow_network {
+        CHROME_SERVICE_HOSTS
+            .iter()
+            .map(|host| format!("MAP {host} ~NOTFOUND"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        // IP literals also match MAP *, so keep loopback for dip's own origins.
+        "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1".into()
+    };
+    format!("--host-resolver-rules={rules}")
+}
+
 fn extra_args() -> Result<Vec<String>> {
     let Some(value) = env::var_os("DIP_CHROME_ARGS") else {
         return Ok(Vec::new());
@@ -256,6 +289,7 @@ pub fn render_with_mode(
             "--no-default-browser-check",
         ])
         .arg(format!("--user-data-dir={}", profile.path().display()))
+        .arg(host_resolver_rules(allow_network))
         .arg("about:blank")
         .stdin(Stdio::null())
         .stdout(Stdio::from(log.try_clone()?))

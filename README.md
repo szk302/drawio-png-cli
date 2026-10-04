@@ -128,7 +128,7 @@ dip embed --renderer chromium -i diagram.xml -o diagram.drawio.png
 dip embed --renderer chromium --allow-network -i diagram.xml -o diagram.drawio.png
 ```
 
-`--allow-network` は外部HTTP(S)画像・フォント等の資材取得を許可します。`vscode` モードでは、外部画像・フォントのCanvasへの埋め込みに配信元のCORS許可も必要です。外部スクリプト、フレーム、任意のローカルファイルの読み込みは許可しません。Web資材は、ページ本体をループバック限定の一時HTTPサーバーで、スクリプト等の資材をDevTools Protocol経由で直接ブラウザーに渡し、処理後にサーバーと専用ブラウザープロファイルを片付けます。
+`--allow-network` は外部HTTP(S)画像・フォント等の資材取得を許可します。`vscode` モードでは、外部画像・フォントのCanvasへの埋め込みに配信元のCORS許可も必要です。外部スクリプト、フレーム、任意のローカルファイルの読み込みは許可しません。Chrome 自体も、`--disable-background-networking` 等を指定しても Google のサービス（コンポーネント更新、最適化ガイド、プッシュ通知、アカウント等）へ接続するため、名前解決で止めています。`--allow-network` なしではループバック以外の名前解決をすべて失敗させます。`--allow-network` ありでは図面の資材を取得するため、既知のサービス用ホストだけを止めます。このとき `www.google.com`・`www.gstatic.com` への Chrome 自身の接続は残ります。Web資材は、ページ本体をループバック限定の一時HTTPサーバーで、スクリプト等の資材をDevTools Protocol経由で直接ブラウザーに渡し、処理後にサーバーと専用ブラウザープロファイルを片付けます。
 
 追加オプションは `DIP_CHROME_ARGS` にPOSIX形式で指定します。
 
