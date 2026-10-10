@@ -25,7 +25,7 @@ pub fn is_builtin(library: &Library) -> bool {
     library.name.starts_with(PREFIX)
 }
 
-/// Every built-in library in sidebar order.
+/// Every built-in library, in name order.
 pub fn libraries() -> Result<Vec<Library>> {
     let catalog: Value = serde_json::from_slice(&storage::read_limited(
         flate2::read::GzDecoder::new(CATALOG),
@@ -63,13 +63,16 @@ pub fn libraries() -> Result<Vec<Library>> {
         .collect()
 }
 
-/// One page laying out the given entries, each above a label naming its
-/// library, index (1-based) and title, for `dip library preview`.
+/// One page laying out the given entries, each below a label naming its
+/// library, index (1-based) and title, for `dip library preview`. The label
+/// goes above the entry because sidebar shapes often show their own label below.
 pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
     const ICON: f64 = 96.0;
     const SLOT: f64 = 160.0;
     const WIDTH: f64 = 960.0;
-    const LABEL: f64 = 44.0;
+    const LABEL: f64 = 30.0;
+    // Room below each entry for its own label, such as verticalLabelPosition=bottom.
+    const OWN_LABEL: f64 = 36.0;
     ensure!(!entries.is_empty(), "no entries to preview");
     ensure!(
         entries.len() <= PREVIEW_LIMIT,
@@ -92,7 +95,7 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
         let mut placement = Placement {
             page: 1,
             x: x + (slot - width) / 2.0,
-            y: y + 10.0,
+            y: y + LABEL + 4.0,
             width: (scale < 1.0).then_some(width),
             height: (scale < 1.0).then_some(height),
             id: None,
@@ -121,7 +124,7 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
             slot - 10.0,
             LABEL,
             format!(
-                r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" value="{}" style="text;html=0;align=center;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontColor=#333333;" vertex="1" parent="1"><mxGeometry width="{}" height="{LABEL}" as="geometry"/></mxCell></root></mxGraphModel>"#,
+                r#"<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" value="{}" style="text;html=0;align=center;verticalAlign=bottom;whiteSpace=wrap;fontSize=10;fontColor=#333333;" vertex="1" parent="1"><mxGeometry width="{}" height="{LABEL}" as="geometry"/></mxCell></root></mxGraphModel>"#,
                 escape(&text),
                 slot - 10.0
             ),
@@ -129,14 +132,14 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
         let label_at = Placement {
             page: 1,
             x: x + 5.0,
-            y: y + 14.0 + shown,
+            y,
             width: None,
             height: None,
             id: None,
             label: None,
         };
         xml = library::insert(&next, &label, &label_at)?.0;
-        row = row.max(shown + LABEL + 24.0);
+        row = row.max(LABEL + 4.0 + shown + OWN_LABEL);
         x += slot;
     }
     Ok(xml)

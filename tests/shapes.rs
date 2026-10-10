@@ -198,7 +198,8 @@ fn insert_adds_built_in_shapes_by_title_or_index() {
 
     let ambiguous = stderr(&mut insert(&["--name", "Lambda"]), 1);
     assert!(
-        ambiguous.contains("\"Lambda\" is in libraries \"drawio/aws3-compute\""),
+        ambiguous.contains("\"Lambda\" is in libraries ")
+            && ambiguous.contains("\"drawio/aws4-compute\""),
         "{ambiguous}"
     );
     assert!(ambiguous.ends_with("; use --library\n"), "{ambiguous}");

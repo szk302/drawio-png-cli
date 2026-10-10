@@ -14,7 +14,12 @@
   var skip = {addPalette: 1, addPaletteFunctions: 1, addStencilPalette: 1, addSearchPalette: 1, addImagePalette: 1};
   var names = Object.keys(Sidebar.prototype).filter(function(k) {
     return /^add[A-Za-z0-9]*Palettes?$/.test(k) && typeof Sidebar.prototype[k] === 'function' && !skip[k];
-  }).sort();
+  }).sort(function(a, b) {
+    // A family's palette function (addIBMPalette) passes the style prefix and
+    // sizes its member functions (addIBMDataPalette) need; call it first, so a
+    // member never registers its palette from a bare call with undefined values.
+    return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+  });
 
   var sb = Object.create(Sidebar.prototype);
   var container = document.createElement('div');

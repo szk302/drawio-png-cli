@@ -364,6 +364,11 @@ fn libraries(
     Ok(libraries.into_iter().filter(|l| l.name == chosen).collect())
 }
 
+/// A size for display, without floating-point noise such as 50.099999999999994.
+fn size(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
 /// Keeps one record per line.
 fn one_line(text: &str) -> String {
     text.chars()
@@ -419,8 +424,8 @@ fn library_command(command: LibraryCommand) -> Result<()> {
                     library.name,
                     index + 1,
                     one_line(&entry.title),
-                    entry.width,
-                    entry.height
+                    size(entry.width),
+                    size(entry.height)
                 ));
             }
         }

@@ -82,6 +82,10 @@ def main():
         sys.exit('Usage: shape_catalog.py /path/to/drawio-checkout')
     catalog, seen = [], set()
     for palette in palettes(Path(sys.argv[1])):
+        # A palette built without its family's arguments has broken styles and sizes.
+        if any(re.search(r'undefined|="NaN"', e['xml']) for e in palette['entries']):
+            print(f'note: skipped {palette["id"]}: built without its arguments', file=sys.stderr)
+            continue
         entries = [{'title': text(e['title']), 'w': size(e.get('w')), 'h': size(e.get('h')), 'xml': e['xml']}
                    for e in palette['entries'] if 'data:image' not in e['xml']]
         if not entries:
@@ -90,6 +94,8 @@ def main():
         assert name not in seen, name
         seen.add(name)
         catalog.append({'name': name, 'title': text(palette['title']), 'entries': entries})
+    # Name order, independent of the order the sidebar functions ran in.
+    catalog.sort(key=lambda p: p['name'])
     names = {p['name'] for p in catalog}
     for required in ('aws4-compute', 'azure2-compute', 'gcp2-zones', 'kubernetes'):
         assert required in names, required
