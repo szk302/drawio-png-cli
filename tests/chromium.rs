@@ -660,6 +660,37 @@ mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', DipIcon);"#,
 
 #[test]
 #[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
+fn real_chromium_previews_a_custom_library_without_web_assets() {
+    let (program, args) = browser();
+    let dir = tempfile::tempdir().unwrap();
+    let library = dir.path().join("icons.xml");
+    // A red 1x1 PNG, as libraries such as Simple Icons embed their icons.
+    fs::write(
+        &library,
+        r#"<mxlibrary>[{"data":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==","w":32,"h":32,"title":"Red Dot"}]</mxlibrary>"#,
+    )
+    .unwrap();
+    let output = dir.path().join("preview.png");
+    dip()
+        .env("DIP_CHROME_PATH", program)
+        .env("DIP_CHROME_ARGS", shell_words::join(args))
+        .args(["library", "preview", "dot", "--library-file"])
+        .arg(&library)
+        .arg("-o")
+        .arg(&output)
+        .assert()
+        .success();
+    let (width, height, rgba) = pixels(&fs::read(&output).unwrap());
+    assert!(width > 32 && height > 32);
+    // The icon itself is drawn, not only its label.
+    assert!(
+        rgba.chunks(4)
+            .any(|p| p[0] > 200 && p[1] < 60 && p[2] < 60 && p[3] > 200)
+    );
+}
+
+#[test]
+#[ignore = "requires Chromium; set DIP_TEST_CHROME_PATH"]
 fn real_chromium_deadline_covers_javascript_execution() {
     let (program, args) = browser();
     let dir = tempfile::tempdir().unwrap();

@@ -11,16 +11,6 @@
 <script>
 // Records every draw.io sidebar entry as JSON (maintainer tool; see scripts/shape_catalog.py).
 (function() {
-  var skip = {addPalette: 1, addPaletteFunctions: 1, addStencilPalette: 1, addSearchPalette: 1, addImagePalette: 1};
-  var names = Object.keys(Sidebar.prototype).filter(function(k) {
-    return /^add[A-Za-z0-9]*Palettes?$/.test(k) && typeof Sidebar.prototype[k] === 'function' && !skip[k];
-  }).sort(function(a, b) {
-    // A family's palette function (addIBMPalette) passes the style prefix and
-    // sizes its member functions (addIBMDataPalette) need; call it first, so a
-    // member never registers its palette from a bare call with undefined values.
-    return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
-  });
-
   var sb = Object.create(Sidebar.prototype);
   var container = document.createElement('div');
   document.body.appendChild(container);
@@ -32,6 +22,14 @@
   sb.createTitle = function() { return document.createElement('div'); };
   sb.addFoldingHandler = function() {};
   sb.editorUi = {editor: {graph: sb.graph}, sidebar: sb};
+  sb.initialDefaultVertexStyle = {};
+  // Load stencil sets synchronously from stencils.min.js; when indexing they
+  // load asynchronously and the palettes would still be empty below.
+  sb.addStencilsToIndex = false;
+  // UI-only steps of initPalettes.
+  sb.addSearchPalette = function() {};
+  sb.addCustomEntries = function() {};
+  sb.showEntries = function() {};
   window.sb = sb;
 
   var seen = {}, palettes = [], cur = null, errors = [];
@@ -57,7 +55,7 @@
 
   sb.createItem = function(cells, title, showLabel, showTitle, width, height) {
     if (cur != null && cells != null && cells.length > 0) {
-      cur.entries.push({title: title || '', w: width, h: height,
+      cur.entries.push({title: typeof title === 'string' ? title : '', w: width, h: height,
         xml: encodeCells(sb.graph.cloneCells(cells))});
     }
     return document.createElement('a');
@@ -75,11 +73,9 @@
     return div;
   };
 
-  for (var i = 0; i < names.length; i++) {
-    try { sb[names[i]](); } catch (err) { errors.push(names[i] + ': ' + err.message); }
-  }
+  // The palettes of draw.io's sidebar, with the arguments draw.io passes.
+  try { sb.initPalettes(); } catch (err) { errors.push('initPalettes: ' + err.message); }
 
-  // Stencil sets load synchronously from stencils.min.js, so every entry exists now.
   document.getElementById('out').textContent = JSON.stringify({palettes: palettes, errors: errors});
 })();
 </script>

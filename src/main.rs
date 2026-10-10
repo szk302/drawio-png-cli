@@ -302,7 +302,9 @@ fn run(cli: Cli) -> Result<()> {
 
 /// The libraries to use: the given file, or those on DIP_LIBRARY_PATH followed
 /// by the built-in ones unless `builtin` is false, optionally only the one with
-/// the given name. A built-in library may be named without its drawio/ prefix.
+/// the given name. File-based names never contain '/', so an exact name is
+/// unambiguous; a built-in library may be named without its drawio/ prefix
+/// when no library has that exact name.
 fn libraries(
     file: Option<PathBuf>,
     name: Option<&str>,
@@ -339,11 +341,7 @@ fn libraries(
     let prefixed = format!("{}{name}", shapes::PREFIX);
     let has = |n: &str| libraries.iter().any(|l| l.name == n);
     let chosen = match (has(name), has(&prefixed)) {
-        (true, true) => anyhow::bail!(
-            "{name:?} is both a library on DIP_LIBRARY_PATH and the built-in {prefixed:?}; \
-             use --library {prefixed} for the built-in one, or --no-builtin"
-        ),
-        (true, false) => name,
+        (true, _) => name,
         (false, true) => prefixed.as_str(),
         (false, false) => {
             let mut available: Vec<_> = libraries
@@ -494,11 +492,12 @@ fn matches<'a>(
 }
 
 /// The entry at a 1-based `index` of the only library given.
-fn entry_at(
-    libraries: &[library::Library],
+fn entry_at<'a>(
+    libraries: impl IntoIterator<Item = &'a library::Library>,
     index: usize,
-) -> Result<(&library::Library, &library::Entry)> {
-    let [library] = libraries else {
+) -> Result<(&'a library::Library, &'a library::Entry)> {
+    let libraries: Vec<_> = libraries.into_iter().collect();
+    let [library] = libraries[..] else {
         anyhow::bail!("--index needs one library; use --library");
     };
     let entry = index
@@ -523,9 +522,19 @@ fn insert(
     placement: library::Placement<'_>,
 ) -> Result<()> {
     let libraries = source.libraries()?;
+    // A title on DIP_LIBRARY_PATH wins over the built-in libraries, as before they existed.
+    let (custom, builtin): (Vec<_>, Vec<_>) =
+        libraries.into_iter().partition(|l| !shapes::is_builtin(l));
+    let libraries: Vec<_> = custom.iter().chain(&builtin).collect();
     let entry = match (name, index) {
-        (Some(name), _) => library::find(&libraries, &name)?.1,
-        (None, Some(index)) => entry_at(&libraries, index)?.1,
+        (Some(name), _) => {
+            let lower = name.to_lowercase();
+            let in_custom = custom
+                .iter()
+                .any(|l| l.entries.iter().any(|e| e.title.to_lowercase() == lower));
+            library::find(if in_custom { &custom } else { &builtin }, &name)?.1
+        }
+        (None, Some(index)) => entry_at(libraries, index)?.1,
         (None, None) => unreachable!("clap requires --name or --index"),
     };
     for (flag, value) in [

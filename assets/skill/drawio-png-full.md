@@ -102,10 +102,10 @@ dip library preview lambda -o "$tmp/icons.png"  # 候補を画像で見比べる
   `shape=` や `resIcon=` だけを抜き出さない。幅・高さは検索結果のサイズを使う（縦横比を保てば拡大・縮小してよい）。
 - 画像のアイコン（利用者のライブラリの多く）や、カード・グループなど複数セルの図形は、style を写せない
   （`dip library style` はエラーになる）。`dip insert` で入れる。アイコンの `style` には大きな Base64 が入るので、自分で書き写さない。
-- 組み込みには旧版の図形集（`drawio/aws3-*`・`drawio/aws2-*`・`drawio/aws3d` など）も含まれる。ユーザーが求めない限り、
+- 組み込みには旧版の図形集（`drawio/aws3-*`・`drawio/aws3d`・`drawio/aws4b-*` など）も含まれる。ユーザーが求めない限り、
   AWS は `drawio/aws4-*`、Azure は `drawio/azure2-*`、Google Cloud は `drawio/gcp2-*`、Kubernetes は `drawio/kubernetes` を使う。
   同じものが利用者のライブラリにもあれば（最新の公式アイコンなど）、そちらを使ってよい。
-- 見た目で選ぶ必要があるときだけ `dip library preview` を使う。各図形の下に「ライブラリ #番号」とタイトルが出る。
+- 見た目で選ぶ必要があるときだけ `dip library preview` を使う。各図形の上に「ライブラリ #番号」とタイトルが出る（図形自身のラベルは下に出る）。
   一度に 60 件まで。多すぎれば検索語か `--library` で絞る。組み込みの図形の描画には Web 資材が必要。
 - 挿入後のラベル付けや接続線は、出力された ID（`--id` で指定可）を使って XML を編集する。
   `--label` でラベルも付けられるが、位置・書式はライブラリの `style` のまま（アイコンに重なることがある）。

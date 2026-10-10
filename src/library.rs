@@ -34,6 +34,53 @@ impl Entry {
         }
     }
 
+    /// Whether the entry is a single vertex, which `insert` can resize, and the
+    /// size of its top-level cells' bounding box (vertices and edge points, as
+    /// `insert` aligns them), never less than the declared size of a multi-cell entry.
+    pub fn extent(&self) -> Result<(bool, f64, f64)> {
+        if matches!(self.content, Content::Image { .. }) {
+            return Ok((true, self.width, self.height));
+        }
+        let model = entry_model(self)?;
+        let source = document::parse(&model).context("invalid library entry")?;
+        let cells = Cells::of(source.root_element())?;
+        let (mut left, mut top) = (f64::INFINITY, f64::INFINITY);
+        let (mut right, mut bottom) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut include = |x: f64, y: f64, width: f64, height: f64| {
+            left = left.min(x);
+            top = top.min(y);
+            right = right.max(x + width);
+            bottom = bottom.max(y + height);
+        };
+        let mut vertices = 0;
+        for &cell in cells.content.iter().filter(|c| cells.is_top(**c)) {
+            let Some(geometry) = geometry(cell) else {
+                continue;
+            };
+            if inner(cell).attribute("edge") == Some("1") {
+                for point in geometry
+                    .descendants()
+                    .filter(|n| n.has_tag_name("mxPoint") && n.attribute("as") != Some("offset"))
+                {
+                    include(number(point, "x"), number(point, "y"), 0.0, 0.0);
+                }
+            } else if geometry.attribute("relative") != Some("1") {
+                vertices += 1;
+                let (x, y) = (number(geometry, "x"), number(geometry, "y"));
+                include(x, y, number(geometry, "width"), number(geometry, "height"));
+            }
+        }
+        if right < left {
+            return Ok((false, self.width, self.height));
+        }
+        let (width, height) = (right - left, bottom - top);
+        Ok(if cells.content.len() == 1 && vertices == 1 {
+            (true, width, height)
+        } else {
+            (false, width.max(self.width), height.max(self.height))
+        })
+    }
+
     /// The style of an entry made of one cell, to copy into hand-written XML;
     /// `None` for multi-cell entries and images, whose data belongs in `insert`.
     pub fn style(&self) -> Result<Option<String>> {

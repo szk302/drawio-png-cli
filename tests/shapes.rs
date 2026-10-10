@@ -43,7 +43,20 @@ fn catalog_holds_cells_and_styles_but_no_images() {
     let libraries = shapes::libraries().unwrap();
     assert!(libraries.len() > 300);
     assert!(libraries.iter().all(shapes::is_builtin));
-    for name in ["aws4-compute", "azure2-compute", "gcp2-zones", "kubernetes"] {
+    // Palettes initPalettes passes arguments to or registers itself.
+    for name in [
+        "aws4-compute",
+        "aws4-groups",
+        "azure2-compute",
+        "gcp2-zones",
+        "kubernetes",
+        "general",
+        "arrows",
+        "cisco-routers",
+        "signs-safety",
+        "rack-cisco",
+        "pid-pumps",
+    ] {
         let name = format!("drawio/{name}");
         assert!(libraries.iter().any(|l| l.name == name), "{name}");
     }
@@ -70,6 +83,13 @@ fn built_in_libraries_are_listed_and_searched_without_styles() {
     );
     assert!(found.contains("drawio/aws3-compute\t"), "{found}");
     assert!(!found.contains("style") && !found.contains("mxgraph"));
+    // Entries without a sidebar title take their label, like the AWS groups.
+    let vpc = stdout(dip().args(["library", "search", "vpc", "--library", "aws4-groups"]));
+    assert_eq!(vpc, "drawio/aws4-groups\t7\tVPC\t130x130\n");
+    assert_eq!(
+        stdout(dip().args(["library", "search", "biohazard"])),
+        "drawio/signs-safety\t1\tBiohazard\t106x97\n"
+    );
     // The drawio/ prefix may be left out.
     for library in ["drawio/aws4-compute", "aws4-compute"] {
         assert_eq!(
@@ -217,35 +237,149 @@ fn insert_adds_built_in_shapes_by_title_or_index() {
 }
 
 #[test]
-fn a_custom_library_named_like_a_built_in_one_needs_the_prefix() {
+fn custom_libraries_keep_their_names_and_titles_next_to_built_in_ones() {
     let directory = tempdir().unwrap();
+    // Named like drawio/kubernetes, with a title the built-in libraries also use.
     let file = directory.path().join("kubernetes.xml");
     fs::write(
         &file,
         r#"<mxlibrary>[{"data":"data:image/png;base64,iVBORw0KGgo=","w":16,"h":16,"title":"Pod"}]</mxlibrary>"#,
     )
     .unwrap();
-    let search = |library: &str| {
+    let run = |args: &[&str]| {
         let mut command = dip();
-        command.env("DIP_LIBRARY_PATH", &file).args([
+        command.env("DIP_LIBRARY_PATH", &file).args(args);
+        command
+    };
+    // An exact name is the custom library; drawio/ selects the built-in one.
+    assert_eq!(
+        stdout(&mut run(&[
             "library",
             "search",
             "pod",
             "--library",
-            library,
-        ]);
-        command
-    };
-    let both = stderr(&mut search("kubernetes"), 1);
-    assert!(
-        both.contains("use --library drawio/kubernetes for the built-in one, or --no-builtin"),
-        "{both}"
-    );
-    assert!(stdout(&mut search("drawio/kubernetes")).starts_with("drawio/kubernetes\t"));
-    assert_eq!(
-        stdout(search("kubernetes").arg("--no-builtin")),
+            "kubernetes"
+        ])),
         "kubernetes\t1\tPod\t16x16\n"
     );
+    assert!(
+        stdout(&mut run(&[
+            "library",
+            "search",
+            "pod",
+            "--library",
+            "drawio/kubernetes"
+        ]))
+        .starts_with("drawio/kubernetes\t")
+    );
+    assert!(stdout(&mut run(&["library", "show", "kubernetes"])).starts_with("name: kubernetes\n"));
+    assert!(
+        stdout(&mut run(&["library", "show", "drawio/kubernetes"]))
+            .starts_with("name: drawio/kubernetes\n")
+    );
+    let image = stderr(&mut run(&["library", "style", "kubernetes", "1"]), 1);
+    assert!(
+        image.contains("`dip insert --library kubernetes --index 1`"),
+        "{image}"
+    );
+    assert_eq!(
+        stdout(&mut run(&["library", "style", "drawio/kubernetes", "24"]))
+            .lines()
+            .count(),
+        1
+    );
+
+    // Without --library, a title on DIP_LIBRARY_PATH wins over the built-in ones.
+    let output = directory.path().join("out.xml");
+    fs::write(&output, MODEL).unwrap();
+    let insert = |args: &[&str]| {
+        let mut command = run(&["insert"]);
+        command
+            .args(args)
+            .arg("-i")
+            .arg(&output)
+            .arg("-o")
+            .arg(&output);
+        command
+    };
+    assert_eq!(
+        stdout(&mut insert(&["--name", "pod", "--id", "mine"])),
+        "mine\n"
+    );
+    let xml = fs::read_to_string(&output).unwrap();
+    assert!(xml.contains("image=data:image/png,iVBORw0KGgo="), "{xml}");
+    // Titles only the built-in libraries have are still found there.
+    assert_eq!(
+        stdout(&mut insert(&["--name", "Private subnet", "--id", "subnet"])),
+        "subnet\n"
+    );
+}
+
+/// Checks that each previewed entry's top-level vertices, which come before
+/// its label, overlap neither another entry nor another label.
+fn assert_separate(xml: &str, name: &str) {
+    type Rect = (f64, f64, f64, f64);
+    let doc = roxmltree::Document::parse(xml).unwrap();
+    let mut slots: Vec<(Option<Rect>, Rect, String)> = Vec::new();
+    let mut current: Option<Rect> = None;
+    for node in doc.descendants() {
+        let cell = match node.tag_name().name() {
+            "mxCell"
+                if !node
+                    .parent_element()
+                    .is_some_and(|p| p.tag_name().name() != "root") =>
+            {
+                node
+            }
+            "object" | "UserObject" => match node.children().find(|n| n.has_tag_name("mxCell")) {
+                Some(cell) => cell,
+                None => continue,
+            },
+            _ => continue,
+        };
+        if cell.attribute("parent") != Some("1") || cell.attribute("vertex") != Some("1") {
+            continue;
+        }
+        let Some(geometry) = cell.children().find(|n| n.has_tag_name("mxGeometry")) else {
+            continue;
+        };
+        let number = |key| {
+            geometry
+                .attribute(key)
+                .map_or(0.0, |v: &str| v.parse().unwrap())
+        };
+        let (x, y) = (number("x"), number("y"));
+        let rect = (x, y, x + number("width"), y + number("height"));
+        let value = node
+            .attribute("value")
+            .or(node.attribute("label"))
+            .unwrap_or("");
+        if value.starts_with(name) {
+            slots.push((current.take(), rect, value.replace('\n', " ")));
+        } else {
+            current = Some(current.map_or(rect, |c| {
+                (
+                    c.0.min(rect.0),
+                    c.1.min(rect.1),
+                    c.2.max(rect.2),
+                    c.3.max(rect.3),
+                )
+            }));
+        }
+    }
+    let hit =
+        |a: Rect, b: Rect| a.0 < b.2 - 0.5 && b.0 < a.2 - 0.5 && a.1 < b.3 - 0.5 && b.1 < a.3 - 0.5;
+    for (i, (entry, _, title)) in slots.iter().enumerate() {
+        let Some(entry) = entry else { continue };
+        for (j, (other, label, other_title)) in slots.iter().enumerate() {
+            if i != j {
+                assert!(
+                    !hit(*entry, *label) && !other.is_some_and(|o| hit(*entry, o)),
+                    "{title} overlaps {other_title}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -260,6 +394,19 @@ fn preview_lays_out_labelled_entries_and_limits_their_number() {
     document::validate(&xml).unwrap();
     assert!(xml.contains("drawio/kubernetes #1&#xa;"));
     assert!(xml.contains("drawio/kubernetes #12&#xa;"));
+    // Groups, pools and connectors keep their size and must not reach a neighbour.
+    for name in [
+        "drawio/advanced",
+        "drawio/bootstrap",
+        "drawio/sysml-activities",
+        "drawio/gcp2-product-cards",
+    ] {
+        let library = libraries.iter().find(|l| l.name == name).unwrap();
+        let all: Vec<_> = (0..library.entries.len()).map(|i| (library, i)).collect();
+        for chunk in all.chunks(shapes::PREVIEW_LIMIT) {
+            assert_separate(&shapes::preview(chunk).unwrap(), name);
+        }
+    }
 
     let directory = tempdir().unwrap();
     let output = directory.path().join("preview.png");

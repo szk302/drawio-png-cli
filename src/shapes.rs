@@ -85,14 +85,20 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
     let (mut x, mut y, mut row) = (0.0, 0.0, 0.0_f64);
     for (library, index) in entries {
         let entry = &library.entries[*index];
-        // Shrink large single cells to a common size; groups keep theirs.
-        let scale = (ICON / entry.width.max(entry.height)).min(1.0);
-        let (width, height) = (entry.width * scale, entry.height * scale);
+        // Shrink large single vertices to a common size; other entries keep
+        // theirs, so their slot follows their actual extent.
+        let (single, extent_width, extent_height) = entry.extent()?;
+        let scale = if single {
+            (ICON / extent_width.max(extent_height)).min(1.0)
+        } else {
+            1.0
+        };
+        let (width, height) = (extent_width * scale, extent_height * scale);
         let slot = width.max(SLOT - 20.0) + 20.0;
         if x > 0.0 && x + slot > WIDTH {
             (x, y, row) = (0.0, y + row, 0.0);
         }
-        let mut placement = Placement {
+        let placement = Placement {
             page: 1,
             x: x + (slot - width) / 2.0,
             y: y + LABEL + 4.0,
@@ -101,11 +107,7 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
             id: None,
             label: None,
         };
-        let added = library::insert(&xml, entry, &placement).or_else(|_| {
-            (placement.width, placement.height) = (None, None);
-            library::insert(&xml, entry, &placement)
-        });
-        let (next, _) = added.with_context(|| {
+        let (next, _) = library::insert(&xml, entry, &placement).with_context(|| {
             format!(
                 "cannot place {} #{} {:?}",
                 library.name,
@@ -113,11 +115,7 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
                 entry.title
             )
         })?;
-        let shown = if placement.width.is_some() {
-            height
-        } else {
-            entry.height
-        };
+        let shown = height;
         let text = format!("{} #{}\n{}", library.name, index + 1, entry.title);
         let label = Entry::model(
             String::new(),

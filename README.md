@@ -106,7 +106,7 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 | `-o`, `--output FILE` | 出力 XML（必須）。入力と同じパスも可 |
 | `--name TITLE` | エントリーをタイトルで選ぶ（完全一致、なければ大文字小文字を区別しない一意の一致） |
 | `--index N` | ライブラリの中の番号（1 から）で選ぶ。ライブラリが 1 つに決まるときのみ |
-| `--library NAME` | 使うライブラリを名前で絞る。利用者のライブラリはファイル名から `.xml` を除いたもの、組み込みは `drawio/<名前>`（一意なら `drawio/` は省略可） |
+| `--library NAME` | 使うライブラリを名前で絞る。利用者のライブラリはファイル名から `.xml` を除いたもの、組み込みは `drawio/<名前>`（その名前の利用者のライブラリが無ければ `drawio/` は省略可） |
 | `--library-file FILE` | `DIP_LIBRARY_PATH` と組み込みライブラリの代わりに、このライブラリのファイルだけを使う |
 | `--no-builtin` | 組み込みライブラリ（`drawio/*`）を使わない |
 | `--page N` | 挿入先のページ（1 から、既定 1） |
@@ -115,7 +115,7 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 | `--id ID` | 最上位のセルの ID。複数セルの図形の他のセルは `<ID>-<n>` |
 | `--label TEXT` | 最上位のセルのラベル（最上位のセルが 1 つの図形のみ） |
 
-エントリーは `--name` か `--index` のどちらかで選びます。`--library-file` は `--library`・`--no-builtin` と併用できません。
+エントリーは `--name` か `--index` のどちらかで選びます。`--library` を付けずに `--name` を使うと、`DIP_LIBRARY_PATH` のライブラリにそのタイトルがあればそちらを、無ければ組み込みライブラリから選びます。`--library-file` は `--library`・`--no-builtin` と併用できません。
 
 ### `dip library`
 
@@ -191,7 +191,7 @@ dip embed -i diagram.xml -o diagram.drawio.png
 
 ## draw.io の組み込み図形（組み込みライブラリ）
 
-AWS・Azure・Google Cloud（GCP2）・Kubernetes・UML など、draw.io のサイドバーにある図形（`shape=mxgraph.*` など）の style を、推測せずに取り出したり挿入したりできます。dip は、VS Code 拡張 1.9.0 と同じ draw.io 26.0.2 のサイドバーから作った図形の一覧（約 400 の図形集、約 11,600 図形）を同梱しています。各図形集は、`drawio/aws4-compute` のような名前の組み込みライブラリとして、利用者のライブラリと同じ `dip library` の各コマンドと `dip insert` で使えます。
+AWS・Azure・Google Cloud（GCP2）・Kubernetes・UML など、draw.io のサイドバーにある図形（`shape=mxgraph.*` など）の style を、推測せずに取り出したり挿入したりできます。dip は、VS Code 拡張 1.9.0 と同じ draw.io 26.0.2 のサイドバーから作った図形の一覧（約 440 の図形集、約 12,700 図形）を同梱しています。各図形集は、`drawio/aws4-compute` のような名前の組み込みライブラリとして、利用者のライブラリと同じ `dip library` の各コマンドと `dip insert` で使えます。
 
 ```sh
 dip library search lambda                  # ライブラリ・番号・タイトル・サイズ（style は出さない）
@@ -202,11 +202,11 @@ dip insert --library aws4-compute --name Lambda -i diagram.xml -o diagram.xml
 ```
 
 - 組み込みライブラリは、`DIP_LIBRARY_PATH` の利用者のライブラリの後に並びます。`DIP_LIBRARY_PATH` が未設定でも使えます。`--no-builtin` で除外できます。
-- `--library` では `drawio/` を省略できます。ただし、同じ名前の利用者のライブラリがある場合はエラーになるので、`drawio/` を付けるか `--no-builtin` を指定します。
-- 旧版の図形集（`drawio/aws3-*` など）も含みます。
+- `--library` では `drawio/` を省略できます。同じ名前の利用者のライブラリがある場合は、名前どおり利用者のライブラリを使います（組み込みは `drawio/` を付けて指定します）。
+- 旧版の図形集（`drawio/aws3-*` など）も含みます。サイドバーにタイトルが無い図形（AWS のグループなど）は、ラベルや図形名をタイトルにしています。
 - `style` は単一セルの図形だけに使えます。カードやグループなど複数セルの図形、画像のエントリーは `insert` で挿入します。
 - 図形の描画には、従来どおり draw.io 26.0.2 の Web 資材（`DIP_DRAWIO_WEB_PATH`）が必要です。`preview` も Chromium の vscode モードで描画し、一度に 60 件までです。
-- 一覧には、図形のセルと style だけが入っています。アイコンの画像データ（`data:image/...`）を含む図形（GCP2 の製品別アイコンなど）は収録していません。それらのアイコンはカスタムライブラリから挿入してください。
+- 一覧には、図形のセルと style だけが入っています。アイコンの画像データ（`data:image/...`）を含む図形（GCP2 の製品別アイコンなど）は収録していません。それらのアイコンはカスタムライブラリから挿入してください。上流の資材に画像やステンシルが無く描画できない5図形も除いています。
 - 一覧は `python3 scripts/shape_catalog.py /path/to/drawio-checkout` で作り直せます（開発用。Chrome が必要）。
 
 ## レンダラーの選択
