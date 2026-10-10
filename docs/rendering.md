@@ -64,7 +64,7 @@ VS Code側の大画像に対する自動縮小は適用しない。CLIは上限�
 
 外部画像・Webフォントのネットワーク取得は既定で禁止する。`vscode` モードでは `--allow-network` 使用時も、Canvasへ埋め込むには配信元のCORS許可が必要。draw.ioの公開画像プロキシへは転送しない。取得・デコードに失敗した資材を検出した場合はエラーにする。
 
-同梱資材で扱えない図形等には `DIP_DRAWIO_WEB_PATH` を利用できる。vscodeモードでは、拡張と同じく指定先の `js/shapes-14-6-5.min.js`・`js/stencils.min.js` があれば描画前に読み込み、`shapes/*.js` は取得しない。draw.io 26.0.2には `shapes/` がなく、AWS等の図形はこれらのファイルから読み込む。図形・アイコン（AWS図形の `resIcon`・`grIcon`、ステンシルの `include-shape` 等）が見つからない場合、上流は空白のまま描画を続けるが、dipはエラーにして既存出力を保持する。指定先の `export3.html` が、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` を提供する必要がある。確認済みの資材は、vscodeが `96a916a337d13fc8bf622c8a67d422bd284eabe5`（26.0.2）、raw・desktopが `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`（31.4.5）。別コミットの資材は互換性の検証対象外。
+同梱資材で扱えない図形等には `DIP_DRAWIO_WEB_PATH` を利用できる。vscodeモードでは、拡張と同じく指定先の `js/shapes-14-6-5.min.js`・`js/stencils.min.js` があれば描画前に読み込み、`shapes/*.js` は取得しない。draw.io 26.0.2には `shapes/` がなく、AWS等の図形はこれらのファイルから読み込む。図形・アイコン（AWS図形の `resIcon`・`grIcon`、ステンシルの `include-shape` 等）が見つからない場合、上流は空白のまま描画を続けるが、dipはエラーにして既存出力を保持する。ただし、draw.io 26.0.2のサイドバー自身が書き出すのにどの版にも登録されていない図形名（`rect`・`text`・`mxgraph.android.rect` など8種類）は、上流と同じく既定の四角形として描画する。指定先の `export3.html` が、`vscode` では `Graph`・`Editor`・`Editor.exportToCanvas()`、`raw`・`desktop` では `render()`・`LoadingComplete` を提供する必要がある。確認済みの資材は、vscodeが `96a916a337d13fc8bf622c8a67d422bd284eabe5`（26.0.2）、raw・desktopが `f3abfe0f082c18f7b4fee8a34c2d07b1987687fd`（31.4.5）。別コミットの資材は互換性の検証対象外。
 
 ## 回帰テスト
 

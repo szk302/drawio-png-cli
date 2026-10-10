@@ -590,6 +590,22 @@ mxCellRenderer.registerShape('mxgraph.aws4.resourceIcon', DipIcon);"#,
     assert!(
         format!("{:#}", render(&unknown, None, false).unwrap_err()).contains("Unsupported shape")
     );
+    // Names draw.io's own sidebar writes but never registers draw as rectangles, as upstream does.
+    let filled = |shape: &str| {
+        MODEL.replace(
+            "vertex=\"1\"",
+            &format!("vertex=\"1\" style=\"{shape}fillColor=#33b5e5;strokeColor=none;\""),
+        )
+    };
+    let rectangle = pixels(&render(&filled(""), None, false).unwrap());
+    for name in ["rect", "text", "mxgraph.android.rect"] {
+        let shape = format!("shape={name};");
+        assert_eq!(
+            pixels(&render(&filled(&shape), None, false).unwrap()),
+            rectangle,
+            "{name}"
+        );
+    }
     let math = MODEL.replace("<mxGraphModel ", "<mxGraphModel math=\"1\" ");
     assert!(format!("{:#}", render(&math, None, false).unwrap_err()).contains("Math"));
     let huge = MODEL.replace("width=\"100\"", "width=\"20000000\"");
