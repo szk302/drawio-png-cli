@@ -147,6 +147,20 @@ Source and binary archives must retain this file, `LICENSE`,
 (including the generated Cargo dependency notices). No runtime or build-time
 asset download is performed.
 
+## Built-in shape catalog
+
+`assets/shapes/catalog.json.gz`, embedded into dip as the built-in `drawio/*`
+libraries of `dip library` and `dip insert`, lists the titles, sizes, cells and style strings of
+draw.io sidebar entries. `scripts/shape_catalog.py` generates it by running the
+sidebar code of draw.io revision `96a916a337d13fc8bf622c8a67d422bd284eabe5`
+(26.0.2, Apache-2.0) in headless Chrome; the full license text is
+`assets/drawio/licenses/drawio-Apache-2.0.txt`. The catalog is a derived
+listing, not a copy of upstream files. Entries whose cells embed image data
+(`data:image/...`) are excluded, so no icon artwork is distributed; styles only
+name shapes (`shape=mxgraph.*`) or image paths (`image=img/lib/...`) that render
+from the user's own draw.io web assets through `DIP_DRAWIO_WEB_PATH`. Product
+names and logos the shapes depict are trademarks of their respective owners.
+
 The headless export integration calls draw.io's `Editor.exportToCanvas()` in
 `vscode` mode, matching the extension's `xmlpng` save path. The `raw` and
 `desktop` modes use draw.io's `render` / `LoadingComplete` capture protocol.

@@ -61,6 +61,87 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 
 `--base-image` は `--no-render` と組み合わせます。`--no-render` は画像と XML の見た目が同期されない旨を警告します。ベース画像を指定しない場合、既存の出力 PNG の画像は再利用しません。
 
+## コマンド・オプション一覧
+
+各コマンドの詳細は `dip <コマンド> --help` でも確認できます。
+
+| コマンド | 内容 |
+| --- | --- |
+| `dip extract INPUT [-o OUTPUT]` | `.drawio.png` から全ページの非圧縮 XML を取り出す。`-o` を省くと stdout に出力 |
+| `dip validate INPUT` | XML または `.drawio.png` の図面（全ページ）を検証する |
+| `dip embed -o OUTPUT [-i INPUT] [オプション]` | XML を PNG に保存する。`--no-render` がなければ先頭ページを描画する。`-i` を省くと stdin から読む |
+| `dip insert -o OUTPUT [-i INPUT] [オプション]` | ライブラリのエントリー（組み込み図形を含む）を、非圧縮 XML のページに挿入し、新しいセルの ID を出力する |
+| `dip library list` / `ls` | ライブラリの名前・エントリー数・表示名を一覧する（利用者のライブラリの後に組み込みライブラリ） |
+| `dip library show NAME` | ライブラリ 1 つの詳細（名前・表示名・ファイル・エントリー数）を表示する |
+| `dip library search [QUERY]` | エントリーを検索し、ライブラリ・番号・タイトル・サイズを出力する（style や画像データは出さない） |
+| `dip library style LIBRARY INDEX` | 単一セルのエントリーの style を、XML の属性値としてエスケープして 1 行で出力する（画像・複数セルのエントリーはエラー） |
+| `dip library preview [QUERY] -o OUTPUT` | 該当するエントリーを、ライブラリ・番号・タイトル付きで並べた PNG を描画する（最大 60 件） |
+| `dip skill [--full]` | AI エージェント向けの手順書を出力する。`--full` で全機能版 |
+| `dip licenses` | dip・依存クレート・同梱資材のライセンスと通知を出力する |
+
+`dip library` の各コマンドは、図面やライブラリを変更しません（`preview` は指定した PNG だけを書きます）。検索語はタイトルに含まれる文字列で、大文字小文字を区別しません。ライブラリは、`DIP_LIBRARY_PATH` の利用者のライブラリと、dip に同梱した組み込みライブラリ（`drawio/*`）です。
+
+### `dip embed`
+
+| オプション | 内容 |
+| --- | --- |
+| `-i`, `--input FILE` | 入力 XML。省くと stdin から読む |
+| `-o`, `--output FILE` | 出力 PNG（必須）。入力と同じパスも可 |
+| `--no-render` | 描画せず、XML（メタデータ）だけを保存する |
+| `-b`, `--base-image FILE` | この PNG の画素をそのまま使う。`--no-render` が必要 |
+| `--renderer auto\|desktop\|chromium` | 描画に使うレンダラー。既定は `auto`（Desktop を優先し、なければ Chromium） |
+| `--chromium-mode raw\|desktop\|vscode` | Chromium の出力方式。`DIP_CHROMIUM_MODE` より優先。既定は `vscode` |
+| `--allow-network` | Chromium で外部 HTTP(S) の画像・フォントの取得を許可する |
+| `--default-font FAMILY` | `fontFamily` 未指定のセルのフォントを設定し、XML にも保存する |
+| `--fallback-font FAMILY` | 代替フォントを優先順に追加する（複数指定可）。`--default-font` が必要 |
+| `--no-validate` | デバッグ用。XML の検証を省く |
+
+`--renderer`・`--chromium-mode`・`--allow-network` は `--no-render` と併用できません。`--default-font` は `--no-validate` と併用できません。
+
+### `dip insert`
+
+| オプション | 内容 |
+| --- | --- |
+| `-i`, `--input FILE` | 入力 XML。省くと stdin から読む |
+| `-o`, `--output FILE` | 出力 XML（必須）。入力と同じパスも可 |
+| `--name TITLE` | エントリーをタイトルで選ぶ（完全一致、なければ大文字小文字を区別しない一意の一致） |
+| `--index N` | ライブラリの中の番号（1 から）で選ぶ。ライブラリが 1 つに決まるときのみ |
+| `--library NAME` | 使うライブラリを名前で絞る。利用者のライブラリはファイル名から `.xml` を除いたもの、組み込みは `drawio/<名前>`（その名前の利用者のライブラリが無ければ `drawio/` は省略可） |
+| `--library-file FILE` | `DIP_LIBRARY_PATH` と組み込みライブラリの代わりに、このライブラリのファイルだけを使う |
+| `--no-builtin` | 組み込みライブラリ（`drawio/*`）を使わない |
+| `--page N` | 挿入先のページ（1 から、既定 1） |
+| `--x X`・`--y Y` | 挿入する図形の左上の位置（既定 0。負の値も可） |
+| `--width W`・`--height H` | 単一セルの図形のサイズ。片方だけなら縦横比を維持 |
+| `--id ID` | 最上位のセルの ID。複数セルの図形の他のセルは `<ID>-<n>` |
+| `--label TEXT` | 最上位のセルのラベル（最上位のセルが 1 つの図形のみ） |
+
+エントリーは `--name` か `--index` のどちらかで選びます。`--library` を付けずに `--name` を使うと、`DIP_LIBRARY_PATH` のライブラリにそのタイトルがあればそちらを、無ければ組み込みライブラリから選びます。`--library-file` は `--library`・`--no-builtin` と併用できません。
+
+### `dip library`
+
+| コマンド | オプション | 内容 |
+| --- | --- | --- |
+| `list` | `--library-file FILE` | `DIP_LIBRARY_PATH` と組み込みライブラリの代わりに、このファイルだけを使う |
+| `list` | `--no-builtin` | 組み込みライブラリを含めない |
+| `show` | `--library-file FILE` | このファイルだけを使う |
+| `search`・`preview` | `--library NAME` | 1 つのライブラリに絞る（`insert` と同じ名前の規則） |
+| `search`・`preview` | `--library-file FILE` | このファイルだけを使う |
+| `search`・`preview` | `--no-builtin` | 組み込みライブラリを含めない |
+| `preview` | `-o`, `--output FILE` | 出力 PNG（必須）。`--library` を指定しない場合は `QUERY` が必須 |
+
+`style` は、ライブラリ名（`--library` と同じ規則）と番号を位置引数で受け取ります。
+
+### 環境変数
+
+| 環境変数 | 内容 |
+| --- | --- |
+| `DIP_DRAWIO_PATH` / `DIP_DRAWIO_ARGS` | draw.io Desktop の実行ファイルと追加引数 |
+| `DIP_CHROME_PATH` / `CHROME_PATH` | Chromium / Chrome の実行ファイル |
+| `DIP_CHROME_ARGS` | Chromium の追加引数（POSIX 形式のクォート。シェル展開はしない） |
+| `DIP_CHROMIUM_MODE` | Chromium の出力方式（`raw`・`desktop`・`vscode`、既定 `vscode`） |
+| `DIP_DRAWIO_WEB_PATH` | ローカルの draw.io Web 資材のディレクトリ（既定は同梱資材）。AWS などの図形の描画に必要 |
+| `DIP_LIBRARY_PATH` | ライブラリのファイルまたは `*.xml` を含むディレクトリ。`PATH` と同じ区切りで複数指定可 |
+
 ## AI エージェント向けスキル
 
 `skills/drawio-png/` は、Claude Code などの AI エージェントに dip の使い方を教えるスキルです。中身は案内だけで、手順の本文は dip に同梱しており、`dip skill`（基本の手順、vscode モード）と `dip skill --full`（全機能）で出力します。手順は常にインストールされている dip の版と一致します。
@@ -74,9 +155,9 @@ mkdir -p ~/.claude/skills && cp -r skills/drawio-png ~/.claude/skills/
 
 ## カスタムライブラリの図形を挿入
 
-draw.io のカスタムライブラリ（`<mxlibrary>` 形式の XML。Desktop の「File → Open Library」や VS Code 拡張の `hediet.vscode-drawio.customLibraries` で読み込むファイル）の図形・アイコン（エントリー）を、非圧縮の XML に挿入できます。dip はライブラリを同梱・取得しません。ライブラリのファイルは利用者の環境で用意し、`DIP_LIBRARY_PATH` で指定します。
+draw.io のカスタムライブラリ（`<mxlibrary>` 形式の XML。Desktop の「File → Open Library」や VS Code 拡張の `hediet.vscode-drawio.customLibraries` で読み込むファイル）の図形・アイコン（エントリー）を、非圧縮の XML に挿入できます。dip は利用者のライブラリを同梱・取得しません。ライブラリのファイルは利用者の環境で用意し、`DIP_LIBRARY_PATH` で指定します（draw.io のサイドバーの図形は、後述の組み込みライブラリとして同梱しています）。
 
-`DIP_LIBRARY_PATH` には、ファイルまたはディレクトリを `PATH` と同じ区切り（Linux・macOS は `:`、Windows は `;`）で指定します。ディレクトリは直下の `*.xml` を名前順に読み、読めないファイルは警告を出して読み飛ばします。ライブラリ名はファイル名から `.xml` を除いたものです。`--library-file` を指定すると、`DIP_LIBRARY_PATH` の代わりにそのファイルだけを使います。
+`DIP_LIBRARY_PATH` には、ファイルまたはディレクトリを `PATH` と同じ区切り（Linux・macOS は `:`、Windows は `;`）で指定します。ディレクトリは直下の `*.xml` を名前順に読み、読めないファイルは警告を出して読み飛ばします。ライブラリ名はファイル名から `.xml` を除いたものです。`--library-file` を指定すると、`DIP_LIBRARY_PATH` と組み込みライブラリの代わりにそのファイルだけを使います。
 
 ```sh
 export DIP_LIBRARY_PATH="$HOME/.cache/drawio-libraries"
@@ -107,6 +188,26 @@ dip embed -i diagram.xml -o diagram.drawio.png
 - 挿入先は `--page`（1から）の最初のレイヤーです。圧縮ページは展開し、挿入後の XML を検証してから保存します。
 - 画像を `data:` URL で埋め込んだ図形（Simple Icons 等）は同梱資材のまま描画できます。ライブラリが外部 URL の画像を参照する場合、描画には `--allow-network` が必要です。AWS 等の draw.io 図形名（`mxgraph.*`）を使う図形には、描画時に `DIP_DRAWIO_WEB_PATH` が必要です。
 - ライブラリやアイコンのライセンス・商標の条件は、それぞれの提供元に従ってください。
+
+## draw.io の組み込み図形（組み込みライブラリ）
+
+AWS・Azure・Google Cloud（GCP2）・Kubernetes・UML など、draw.io のサイドバーにある図形（`shape=mxgraph.*` など）の style を、推測せずに取り出したり挿入したりできます。dip は、VS Code 拡張 1.9.0 と同じ draw.io 26.0.2 のサイドバーから作った図形の一覧（約 440 の図形集、約 12,700 図形）を同梱しています。各図形集は、`drawio/aws4-compute` のような名前の組み込みライブラリとして、利用者のライブラリと同じ `dip library` の各コマンドと `dip insert` で使えます。
+
+```sh
+dip library search lambda                  # ライブラリ・番号・タイトル・サイズ（style は出さない）
+dip library style drawio/aws4-compute 16   # 1つの図形の style を1行で出力（XML を書くときに写す）
+dip library preview lambda -o shapes.png   # 該当する図形を「ライブラリ #番号」とタイトル付きで並べた PNG
+dip insert --library drawio/aws4-compute --index 16 -i diagram.xml -o diagram.xml --id fn --x 40 --y 40
+dip insert --library aws4-compute --name Lambda -i diagram.xml -o diagram.xml
+```
+
+- 組み込みライブラリは、`DIP_LIBRARY_PATH` の利用者のライブラリの後に並びます。`DIP_LIBRARY_PATH` が未設定でも使えます。`--no-builtin` で除外できます。
+- `--library` では `drawio/` を省略できます。同じ名前の利用者のライブラリがある場合は、名前どおり利用者のライブラリを使います（組み込みは `drawio/` を付けて指定します）。
+- 旧版の図形集（`drawio/aws3-*` など）も含みます。サイドバーにタイトルが無い図形（AWS のグループなど）は、ラベルや図形名をタイトルにしています。
+- `style` は単一セルの図形だけに使えます。カードやグループなど複数セルの図形、画像のエントリーは `insert` で挿入します。
+- 図形の描画には、従来どおり draw.io 26.0.2 の Web 資材（`DIP_DRAWIO_WEB_PATH`）が必要です。`preview` も Chromium の vscode モードで描画し、一度に 60 件までです。
+- 一覧には、図形のセルと style だけが入っています。アイコンの画像データ（`data:image/...`）を含む図形（GCP2 の製品別アイコンなど）は収録していません。それらのアイコンはカスタムライブラリから挿入してください。上流の資材に画像やステンシルが無く描画できない5図形も除いています。
+- 一覧は `python3 scripts/shape_catalog.py /path/to/drawio-checkout` で作り直せます（開発用。Chrome が必要）。
 
 ## レンダラーの選択
 
