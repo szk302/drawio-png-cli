@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use drawio_png_cli::{chromium::ChromiumMode, document, fonts, library, png_data, render, storage};
+use drawio_png_cli::{
+    chromium::ChromiumMode, document, fonts, library, png_data, render, shapes, storage,
+};
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -70,7 +72,7 @@ enum Command {
     },
     /// Validate XML or a draw.io PNG (all pages)
     Validate { input: PathBuf },
-    /// Insert a library entry into a page of an uncompressed draw.io XML file; prints the new cell IDs
+    /// Insert a library entry (including draw.io's built-in shapes) into a page of an uncompressed draw.io XML file; prints the new cell IDs
     #[command(after_help = LIBRARY_ENV)]
     Insert {
         #[command(flatten)]
@@ -108,24 +110,27 @@ enum Command {
         #[arg(long)]
         label: Option<String>,
     },
-    /// Inspect draw.io custom libraries (<mxlibrary> files) without changing anything
+    /// Inspect draw.io custom libraries and the built-in shape libraries (drawio/*) without changing anything
     Library {
         #[command(subcommand)]
         command: LibraryCommand,
     },
 }
 
-const LIBRARY_ENV: &str = "Library environment:\n  DIP_LIBRARY_PATH  Library files or directories of *.xml files, separated like PATH;\n                    used unless --library-file is given";
+const LIBRARY_ENV: &str = "Libraries:\n  DIP_LIBRARY_PATH  Library files or directories of *.xml files, separated like PATH;\n                    used unless --library-file is given\n  drawio/*          Built-in libraries of draw.io 26.0.2's sidebar shapes (AWS, Azure,\n                    Google Cloud, Kubernetes, UML, ...), listed after DIP_LIBRARY_PATH;\n                    rendering most of them needs DIP_DRAWIO_WEB_PATH";
 
 /// Which libraries to use.
 #[derive(clap::Args)]
 struct LibrarySource {
-    /// Library name: its file name without .xml
+    /// Library name: its file name without .xml, or drawio/<name> for a built-in one
     #[arg(long)]
     library: Option<String>,
-    /// Library file to use instead of DIP_LIBRARY_PATH
+    /// Library file to use instead of DIP_LIBRARY_PATH and the built-in libraries
     #[arg(long, value_name = "PATH", conflicts_with = "library")]
     library_file: Option<PathBuf>,
+    /// Leave out the built-in libraries (drawio/*)
+    #[arg(long, conflicts_with = "library_file")]
+    no_builtin: bool,
 }
 
 #[derive(Subcommand)]
@@ -133,16 +138,19 @@ enum LibraryCommand {
     /// List libraries as name, entry count and title
     #[command(visible_alias = "ls", after_help = LIBRARY_ENV)]
     List {
-        /// Library file to use instead of DIP_LIBRARY_PATH
+        /// Library file to use instead of DIP_LIBRARY_PATH and the built-in libraries
         #[arg(long, value_name = "PATH")]
         library_file: Option<PathBuf>,
+        /// Leave out the built-in libraries (drawio/*)
+        #[arg(long, conflicts_with = "library_file")]
+        no_builtin: bool,
     },
     /// Show details of one library
     #[command(after_help = LIBRARY_ENV)]
     Show {
-        /// Library name: its file name without .xml
+        /// Library name: its file name without .xml, or drawio/<name> for a built-in one
         name: String,
-        /// Library file to use instead of DIP_LIBRARY_PATH
+        /// Library file to use instead of DIP_LIBRARY_PATH and the built-in libraries
         #[arg(long, value_name = "PATH")]
         library_file: Option<PathBuf>,
     },
@@ -153,6 +161,28 @@ enum LibraryCommand {
         query: Option<String>,
         #[command(flatten)]
         source: LibrarySource,
+    },
+    /// Print the style of a single-cell entry, to copy into hand-written XML
+    #[command(after_help = LIBRARY_ENV)]
+    Style {
+        /// Library name, as shown by `library search`
+        library: String,
+        /// Entry index in the library, as shown by `library search` (starting at 1)
+        index: usize,
+    },
+    /// Render matching entries, labelled with library, index and title, into a PNG
+    #[command(
+        after_help = "Renders with Chromium in vscode mode, at most 60 entries. Built-in shapes (drawio/*)\nmostly need draw.io 26.0.2 web assets in DIP_DRAWIO_WEB_PATH.\n\nLibraries:\n  DIP_LIBRARY_PATH  Library files or directories of *.xml files, separated like PATH;\n                    used unless --library-file is given"
+    )]
+    Preview {
+        /// Text the title must contain (case-insensitive)
+        #[arg(required_unless_present = "library")]
+        query: Option<String>,
+        #[command(flatten)]
+        source: LibrarySource,
+        /// PNG file to write
+        #[arg(short, long)]
+        output: PathBuf,
     },
 }
 
@@ -270,18 +300,32 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// The libraries to use: the given file, or those on DIP_LIBRARY_PATH,
-/// optionally only the one with the given name.
-fn libraries(file: Option<PathBuf>, name: Option<&str>) -> Result<Vec<library::Library>> {
+/// The libraries to use: the given file, or those on DIP_LIBRARY_PATH followed
+/// by the built-in ones unless `builtin` is false, optionally only the one with
+/// the given name. A built-in library may be named without its drawio/ prefix.
+fn libraries(
+    file: Option<PathBuf>,
+    name: Option<&str>,
+    builtin: bool,
+) -> Result<Vec<library::Library>> {
     let libraries = if let Some(file) = file {
         vec![library::open(&file)?]
     } else {
-        let path = std::env::var_os("DIP_LIBRARY_PATH")
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("set DIP_LIBRARY_PATH or pass --library-file"))?;
-        let (libraries, warnings) = library::search(&path)?;
-        for warning in warnings {
-            eprintln!("warning: skipped {warning}");
+        let path = std::env::var_os("DIP_LIBRARY_PATH").filter(|p| !p.is_empty());
+        anyhow::ensure!(
+            path.is_some() || builtin,
+            "set DIP_LIBRARY_PATH or pass --library-file"
+        );
+        let mut libraries = Vec::new();
+        if let Some(path) = path {
+            let (found, warnings) = library::search(&path)?;
+            for warning in warnings {
+                eprintln!("warning: skipped {warning}");
+            }
+            libraries = found;
+        }
+        if builtin {
+            libraries.extend(shapes::libraries()?);
         }
         libraries
     };
@@ -292,14 +336,32 @@ fn libraries(file: Option<PathBuf>, name: Option<&str>) -> Result<Vec<library::L
         );
         return Ok(libraries);
     };
-    let available: Vec<_> = libraries.iter().map(|l| l.name.clone()).collect();
-    let selected: Vec<_> = libraries.into_iter().filter(|l| l.name == name).collect();
-    anyhow::ensure!(
-        !selected.is_empty(),
-        "no library named {name:?}; available: {}",
-        available.join(", ")
-    );
-    Ok(selected)
+    let prefixed = format!("{}{name}", shapes::PREFIX);
+    let has = |n: &str| libraries.iter().any(|l| l.name == n);
+    let chosen = match (has(name), has(&prefixed)) {
+        (true, true) => anyhow::bail!(
+            "{name:?} is both a library on DIP_LIBRARY_PATH and the built-in {prefixed:?}; \
+             use --library {prefixed} for the built-in one, or --no-builtin"
+        ),
+        (true, false) => name,
+        (false, true) => prefixed.as_str(),
+        (false, false) => {
+            let mut available: Vec<_> = libraries
+                .iter()
+                .filter(|l| !shapes::is_builtin(l))
+                .map(|l| l.name.clone())
+                .collect();
+            if libraries.iter().any(shapes::is_builtin) {
+                available.push(format!("{}* (see `dip library list`)", shapes::PREFIX));
+            }
+            anyhow::bail!(
+                "no library named {name:?}; available: {}",
+                available.join(", ")
+            )
+        }
+    }
+    .to_owned();
+    Ok(libraries.into_iter().filter(|l| l.name == chosen).collect())
 }
 
 /// Keeps one record per line.
@@ -320,8 +382,11 @@ fn print(text: &str) -> Result<()> {
 fn library_command(command: LibraryCommand) -> Result<()> {
     let mut out = String::new();
     match command {
-        LibraryCommand::List { library_file } => {
-            for library in libraries(library_file, None)? {
+        LibraryCommand::List {
+            library_file,
+            no_builtin,
+        } => {
+            for library in libraries(library_file, None, !no_builtin)? {
                 out.push_str(&format!(
                     "{}\t{}\t{}\n",
                     library.name,
@@ -331,39 +396,117 @@ fn library_command(command: LibraryCommand) -> Result<()> {
             }
         }
         LibraryCommand::Show { name, library_file } => {
-            for library in libraries(library_file, Some(&name))? {
+            for library in libraries(library_file, Some(&name), true)? {
+                let file = if shapes::is_builtin(&library) {
+                    "(built in: draw.io 26.0.2 sidebar)".to_owned()
+                } else {
+                    library.path.display().to_string()
+                };
                 out.push_str(&format!(
-                    "name: {}\ntitle: {}\nfile: {}\nentries: {}\n",
+                    "name: {}\ntitle: {}\nfile: {file}\nentries: {}\n",
                     library.name,
                     library.title.as_deref().map_or("-".into(), one_line),
-                    library.path.display(),
                     library.entries.len()
                 ));
             }
         }
         LibraryCommand::Search { query, source } => {
-            let query = query.map(|q| q.to_lowercase());
-            for library in libraries(source.library_file, source.library.as_deref())? {
-                for (index, entry) in library.entries.iter().enumerate() {
-                    if query
-                        .as_ref()
-                        .is_some_and(|q| !entry.title.to_lowercase().contains(q))
-                    {
-                        continue;
-                    }
-                    out.push_str(&format!(
-                        "{}\t{}\t{}\t{}x{}\n",
-                        library.name,
-                        index + 1,
-                        one_line(&entry.title),
-                        entry.width,
-                        entry.height
-                    ));
-                }
+            let libraries = source.libraries()?;
+            for (library, index) in matches(&libraries, query.as_deref()) {
+                let entry = &library.entries[index];
+                out.push_str(&format!(
+                    "{}\t{}\t{}\t{}x{}\n",
+                    library.name,
+                    index + 1,
+                    one_line(&entry.title),
+                    entry.width,
+                    entry.height
+                ));
             }
+        }
+        LibraryCommand::Style { library, index } => {
+            let libraries = libraries(None, Some(&library), true)?;
+            let (library, entry) = entry_at(&libraries, index)?;
+            let style = entry.style()?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{} #{index} is not a single cell with a plain style (several cells or image data); \
+                     add it with `dip insert --library {} --index {index}`",
+                    library.name,
+                    library.name
+                )
+            })?;
+            out = format!("{}\n", one_line(&style));
+        }
+        LibraryCommand::Preview {
+            query,
+            source,
+            output,
+        } => {
+            let libraries = source.libraries()?;
+            let found = matches(&libraries, query.as_deref());
+            anyhow::ensure!(
+                !found.is_empty(),
+                "no entries match; see `dip library search`"
+            );
+            let xml = shapes::preview(&found)?;
+            let png = render::render_selected_with_mode(
+                &xml,
+                render::Renderer::Chromium,
+                false,
+                Some(ChromiumMode::Vscode),
+            )?;
+            storage::atomic_write(&output, &png)?;
         }
     }
     print(&out)
+}
+
+impl LibrarySource {
+    fn libraries(&self) -> Result<Vec<library::Library>> {
+        libraries(
+            self.library_file.clone(),
+            self.library.as_deref(),
+            !self.no_builtin,
+        )
+    }
+}
+
+/// Entries whose title contains `query` (case-insensitive), as (library, 0-based index).
+fn matches<'a>(
+    libraries: &'a [library::Library],
+    query: Option<&str>,
+) -> Vec<(&'a library::Library, usize)> {
+    let query = query.map(str::to_lowercase);
+    libraries
+        .iter()
+        .flat_map(|l| (0..l.entries.len()).map(move |i| (l, i)))
+        .filter(|(l, i)| {
+            query
+                .as_ref()
+                .is_none_or(|q| l.entries[*i].title.to_lowercase().contains(q))
+        })
+        .collect()
+}
+
+/// The entry at a 1-based `index` of the only library given.
+fn entry_at(
+    libraries: &[library::Library],
+    index: usize,
+) -> Result<(&library::Library, &library::Entry)> {
+    let [library] = libraries else {
+        anyhow::bail!("--index needs one library; use --library");
+    };
+    let entry = index
+        .checked_sub(1)
+        .and_then(|i| library.entries.get(i))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "library {:?} has {} entries; --index starts at 1",
+                library.name,
+                library.entries.len()
+            )
+        })?;
+    Ok((library, entry))
 }
 
 fn insert(
@@ -374,24 +517,10 @@ fn insert(
     output: PathBuf,
     placement: library::Placement<'_>,
 ) -> Result<()> {
-    let libraries = libraries(source.library_file, source.library.as_deref())?;
+    let libraries = source.libraries()?;
     let entry = match (name, index) {
         (Some(name), _) => library::find(&libraries, &name)?.1,
-        (None, Some(index)) => {
-            let [library] = libraries.as_slice() else {
-                anyhow::bail!("--index needs one library; use --library");
-            };
-            index
-                .checked_sub(1)
-                .and_then(|i| library.entries.get(i))
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "library {:?} has {} entries; --index starts at 1",
-                        library.name,
-                        library.entries.len()
-                    )
-                })?
-        }
+        (None, Some(index)) => entry_at(&libraries, index)?.1,
         (None, None) => unreachable!("clap requires --name or --index"),
     };
     for (flag, value) in [

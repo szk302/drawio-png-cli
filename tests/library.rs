@@ -412,10 +412,13 @@ fn search_path_finds_libraries_and_selects_by_library_name() {
         )
     };
     // Directories contribute their *.xml files; broken ones are skipped with a warning.
-    let (code, stdout, stderr) = run(&["library", "list"]);
+    let (code, stdout, stderr) = run(&["library", "list", "--no-builtin"]);
     assert_eq!(code, Some(0), "{stderr}");
     assert_eq!(stdout, "main\t6\ttest\nother\t1\t-\n");
-    let (code, stdout, stderr) = run(&["library", "search", "icon"]);
+    // Built-in libraries follow those on DIP_LIBRARY_PATH.
+    let (_, all, _) = run(&["library", "list"]);
+    assert!(all.starts_with(&stdout) && all.contains("\ndrawio/aws4-compute\t"));
+    let (code, stdout, stderr) = run(&["library", "search", "icon", "--no-builtin"]);
     assert_eq!(code, Some(0), "{stderr}");
     assert_eq!(stdout, "main\t1\tIcon A\t144x72\nother\t1\tIcon A\t5x5\n");
     assert!(stderr.contains("warning: skipped invalid library") && stderr.contains("broken.xml"));
@@ -423,7 +426,10 @@ fn search_path_finds_libraries_and_selects_by_library_name() {
     assert_eq!(stdout, "other\t1\tIcon A\t5x5\n");
     let (code, _, stderr) = run(&["library", "show", "missing"]);
     assert_eq!(code, Some(1));
-    assert!(stderr.contains("available: main, other"), "{stderr}");
+    assert!(
+        stderr.contains("available: main, other, drawio/* (see `dip library list`)"),
+        "{stderr}"
+    );
 
     let output = dir.path().join("out.xml");
     fs::write(&output, MODEL).unwrap();
@@ -472,10 +478,11 @@ fn search_path_finds_libraries_and_selects_by_library_name() {
 
 #[test]
 fn library_files_and_names_are_required() {
-    // Without a file, DIP_LIBRARY_PATH is needed; a file excludes --library.
+    // Without a file or the built-in libraries, DIP_LIBRARY_PATH is needed;
+    // a file excludes --library and --no-builtin.
     let output = dip()
         .env_remove("DIP_LIBRARY_PATH")
-        .args(["library", "list"])
+        .args(["library", "list", "--no-builtin"])
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
@@ -488,6 +495,16 @@ fn library_files_and_names_are_required() {
             "lib.xml",
             "--library",
             "lib",
+        ])
+        .assert()
+        .code(2);
+    dip()
+        .args([
+            "library",
+            "list",
+            "--library-file",
+            "lib.xml",
+            "--no-builtin",
         ])
         .assert()
         .code(2);

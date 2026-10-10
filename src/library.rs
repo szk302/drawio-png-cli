@@ -23,6 +23,35 @@ pub struct Entry {
     content: Content,
 }
 
+impl Entry {
+    /// An entry holding an uncompressed `mxGraphModel`.
+    pub fn model(title: String, width: f64, height: f64, xml: String) -> Self {
+        Entry {
+            title,
+            width,
+            height,
+            content: Content::Model(xml),
+        }
+    }
+
+    /// The style of an entry made of one cell, to copy into hand-written XML;
+    /// `None` for multi-cell entries and images, whose data belongs in `insert`.
+    pub fn style(&self) -> Result<Option<String>> {
+        if matches!(self.content, Content::Image { .. }) {
+            return Ok(None);
+        }
+        let model = entry_model(self)?;
+        let source = document::parse(&model).context("invalid library entry")?;
+        let cells = Cells::of(source.root_element())?;
+        Ok(match cells.content.as_slice() {
+            [cell] => Some(inner(*cell).attribute("style").unwrap_or(""))
+                .filter(|style| !style.contains("data:"))
+                .map(str::to_owned),
+            _ => None,
+        })
+    }
+}
+
 enum Content {
     /// An `mxGraphModel`, possibly compressed as draw.io stores it.
     Model(String),
