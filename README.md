@@ -74,7 +74,7 @@ dip embed -i diagram.xml --no-render -o new.drawio.png
 | `dip library list` / `ls` | ライブラリの名前・エントリー数・表示名を一覧する（利用者のライブラリの後に組み込みライブラリ） |
 | `dip library show NAME` | ライブラリ 1 つの詳細（名前・表示名・ファイル・エントリー数）を表示する |
 | `dip library search [QUERY]` | エントリーを検索し、ライブラリ・番号・タイトル・サイズを出力する（style や画像データは出さない） |
-| `dip library style LIBRARY INDEX` | 単一セルのエントリーの style を 1 行で出力する（画像・複数セルのエントリーはエラー） |
+| `dip library style LIBRARY INDEX` | 単一セルのエントリーの style を、XML の属性値としてエスケープして 1 行で出力する（画像・複数セルのエントリーはエラー） |
 | `dip library preview [QUERY] -o OUTPUT` | 該当するエントリーを、ライブラリ・番号・タイトル付きで並べた PNG を描画する（最大 60 件） |
 | `dip skill [--full]` | AI エージェント向けの手順書を出力する。`--full` で全機能版 |
 | `dip licenses` | dip・依存クレート・同梱資材のライセンスと通知を出力する |

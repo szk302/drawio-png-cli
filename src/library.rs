@@ -84,6 +84,12 @@ impl Entry {
     /// The style of an entry made of one cell, to copy into hand-written XML;
     /// `None` for multi-cell entries and images, whose data belongs in `insert`.
     pub fn style(&self) -> Result<Option<String>> {
+        Ok(self.cell_style()?.filter(|style| !style.contains("data:")))
+    }
+
+    /// The style of an entry made of one cell, image data included; `None`
+    /// for multi-cell entries and images.
+    pub fn cell_style(&self) -> Result<Option<String>> {
         if matches!(self.content, Content::Image { .. }) {
             return Ok(None);
         }
@@ -91,9 +97,7 @@ impl Entry {
         let source = document::parse(&model).context("invalid library entry")?;
         let cells = Cells::of(source.root_element())?;
         Ok(match cells.content.as_slice() {
-            [cell] => Some(inner(*cell).attribute("style").unwrap_or(""))
-                .filter(|style| !style.contains("data:"))
-                .map(str::to_owned),
+            [cell] => Some(inner(*cell).attribute("style").unwrap_or("").to_owned()),
             _ => None,
         })
     }

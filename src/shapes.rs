@@ -88,20 +88,30 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
         // Shrink large single vertices to a common size; other entries keep
         // theirs, so their slot follows their actual extent.
         let (single, extent_width, extent_height) = entry.extent()?;
+        // draw.io turns a rotated vertex about its centre; lay out its turned bounds.
+        let turn = if single {
+            rotation(entry.cell_style()?.as_deref().unwrap_or("")).to_radians()
+        } else {
+            0.0
+        };
+        let (cos, sin) = (turn.cos().abs(), turn.sin().abs());
+        let bounds = |w: f64, h: f64| (w * cos + h * sin, w * sin + h * cos);
+        let (turned_width, turned_height) = bounds(extent_width, extent_height);
         let scale = if single {
-            (ICON / extent_width.max(extent_height)).min(1.0)
+            (ICON / turned_width.max(turned_height)).min(1.0)
         } else {
             1.0
         };
         let (width, height) = (extent_width * scale, extent_height * scale);
-        let slot = width.max(SLOT - 20.0) + 20.0;
+        let (shown_width, shown) = bounds(width, height);
+        let slot = shown_width.max(SLOT - 20.0) + 20.0;
         if x > 0.0 && x + slot > WIDTH {
             (x, y, row) = (0.0, y + row, 0.0);
         }
         let placement = Placement {
             page: 1,
             x: x + (slot - width) / 2.0,
-            y: y + LABEL + 4.0,
+            y: y + LABEL + 4.0 + (shown - height) / 2.0,
             width: (scale < 1.0).then_some(width),
             height: (scale < 1.0).then_some(height),
             id: None,
@@ -115,7 +125,6 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
                 entry.title
             )
         })?;
-        let shown = height;
         let text = format!("{} #{}\n{}", library.name, index + 1, entry.title);
         let label = Entry::model(
             String::new(),
@@ -141,6 +150,16 @@ pub fn preview(entries: &[(&Library, usize)]) -> Result<String> {
         x += slot;
     }
     Ok(xml)
+}
+
+/// The rotation=… of a style in degrees, 0 when absent.
+fn rotation(style: &str) -> f64 {
+    style
+        .split(';')
+        .filter_map(|part| part.strip_prefix("rotation="))
+        .next_back()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.0)
 }
 
 fn escape(text: &str) -> String {

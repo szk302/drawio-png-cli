@@ -1,6 +1,6 @@
 //! draw.io's built-in shapes, offered as the drawio/* libraries.
 use assert_cmd::{Command, cargo::cargo_bin_cmd};
-use drawio_png_cli::{document, png_data, shapes};
+use drawio_png_cli::{document, library, png_data, shapes};
 use std::fs;
 use tempfile::tempdir;
 
@@ -23,6 +23,18 @@ fn dip() -> Command {
     command
 }
 
+fn placement() -> library::Placement<'static> {
+    library::Placement {
+        page: 1,
+        x: 0.0,
+        y: 0.0,
+        width: None,
+        height: None,
+        id: None,
+        label: None,
+    }
+}
+
 fn stdout(command: &mut Command) -> String {
     String::from_utf8(command.assert().success().get_output().stdout.clone()).unwrap()
 }
@@ -42,6 +54,27 @@ fn catalog_holds_cells_and_styles_but_no_images() {
     assert!(text.contains("96a916a337d13fc8bf622c8a67d422bd284eabe5"));
     let libraries = shapes::libraries().unwrap();
     assert!(libraries.len() > 300);
+    // childLayout ran as when draw.io adds the cells: the List's items are stacked.
+    let general = libraries
+        .iter()
+        .find(|l| l.name == "drawio/general")
+        .unwrap();
+    let list = &general.entries[30];
+    assert_eq!(list.title, "List");
+    let (model, _) = library::insert(MODEL, list, &placement()).unwrap();
+    let doc = roxmltree::Document::parse(&model).unwrap();
+    let rows: Vec<_> = doc
+        .descendants()
+        .filter(|n| n.attribute("value").is_some_and(|v| v.starts_with("Item ")))
+        .map(|n| {
+            n.first_element_child()
+                .unwrap()
+                .attribute("y")
+                .unwrap_or("0")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(rows, ["30", "60", "90"]);
     assert!(libraries.iter().all(shapes::is_builtin));
     // Palettes initPalettes passes arguments to or registers itself.
     for name in [
@@ -109,6 +142,17 @@ fn built_in_libraries_are_listed_and_searched_without_styles() {
 
 #[test]
 fn style_prints_one_line_for_single_cells_only() {
+    // Styles with JSON values come escaped, ready for a style="..." attribute.
+    let quoted = stdout(dip().args(["library", "style", "drawio/advanced", "39"]));
+    assert!(
+        quoted.contains("newEdgeStyle={&quot;edgeStyle&quot;:"),
+        "{quoted}"
+    );
+    let pasted = MODEL.replace(
+        "vertex=\"1\"",
+        &format!("vertex=\"1\" style=\"{}\"", quoted.trim_end()),
+    );
+    document::validate(&pasted).unwrap();
     let style = stdout(dip().args(["library", "style", "drawio/aws4-compute", "16"]));
     assert!(style.ends_with("shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;\n"));
     assert_eq!(style.lines().count(), 1);
@@ -316,7 +360,7 @@ fn custom_libraries_keep_their_names_and_titles_next_to_built_in_ones() {
 }
 
 /// Checks that each previewed entry's top-level vertices, which come before
-/// its label, overlap neither another entry nor another label.
+/// its label, overlap neither another entry nor any label.
 fn assert_separate(xml: &str, name: &str) {
     type Rect = (f64, f64, f64, f64);
     let doc = roxmltree::Document::parse(xml).unwrap();
@@ -348,8 +392,25 @@ fn assert_separate(xml: &str, name: &str) {
                 .attribute(key)
                 .map_or(0.0, |v: &str| v.parse().unwrap())
         };
-        let (x, y) = (number("x"), number("y"));
-        let rect = (x, y, x + number("width"), y + number("height"));
+        let (x, y, width, height) = (number("x"), number("y"), number("width"), number("height"));
+        // A rotated vertex covers its bounds turned about the centre.
+        let turn = cell
+            .attribute("style")
+            .unwrap_or("")
+            .split(';')
+            .filter_map(|p| p.strip_prefix("rotation="))
+            .next_back()
+            .map_or(0.0, |v| v.parse::<f64>().unwrap().to_radians());
+        let (cos, sin) = (turn.cos().abs(), turn.sin().abs());
+        let (turned_width, turned_height) =
+            (width * cos + height * sin, width * sin + height * cos);
+        let (cx, cy) = (x + width / 2.0, y + height / 2.0);
+        let rect = (
+            cx - turned_width / 2.0,
+            cy - turned_height / 2.0,
+            cx + turned_width / 2.0,
+            cy + turned_height / 2.0,
+        );
         let value = node
             .attribute("value")
             .or(node.attribute("label"))
@@ -372,12 +433,12 @@ fn assert_separate(xml: &str, name: &str) {
     for (i, (entry, _, title)) in slots.iter().enumerate() {
         let Some(entry) = entry else { continue };
         for (j, (other, label, other_title)) in slots.iter().enumerate() {
-            if i != j {
-                assert!(
-                    !hit(*entry, *label) && !other.is_some_and(|o| hit(*entry, o)),
-                    "{title} overlaps {other_title}"
-                );
-            }
+            // Every label, its own included, and every other entry.
+            let other = other.filter(|_| i != j);
+            assert!(
+                !hit(*entry, *label) && !other.is_some_and(|o| hit(*entry, o)),
+                "{title} overlaps {other_title}"
+            );
         }
     }
 }
@@ -400,6 +461,7 @@ fn preview_lays_out_labelled_entries_and_limits_their_number() {
         "drawio/bootstrap",
         "drawio/sysml-activities",
         "drawio/gcp2-product-cards",
+        "drawio/mockup-misc",
     ] {
         let library = libraries.iter().find(|l| l.name == name).unwrap();
         let all: Vec<_> = (0..library.entries.len()).map(|i| (library, i)).collect();
@@ -407,6 +469,17 @@ fn preview_lays_out_labelled_entries_and_limits_their_number() {
             assert_separate(&shapes::preview(chunk).unwrap(), name);
         }
     }
+    // A rotated custom image keeps its turn although its style is not printed.
+    let rotated = library::Library {
+        name: "rotated".into(),
+        title: None,
+        path: "rotated.xml".into(),
+        entries: library::parse(
+            br#"<mxlibrary>[{"title":"Rotated Image","w":350,"h":30,"xml":"&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"2\" style=\"shape=image;image=data:image/png,iVBORw0KGgo=;rotation=-90;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"350\" height=\"30\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;"}]</mxlibrary>"#,
+        )
+        .unwrap(),
+    };
+    assert_separate(&shapes::preview(&[(&rotated, 0)]).unwrap(), "rotated");
 
     let directory = tempdir().unwrap();
     let output = directory.path().join("preview.png");

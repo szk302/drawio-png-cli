@@ -55,8 +55,13 @@
 
   sb.createItem = function(cells, title, showLabel, showTitle, width, height) {
     if (cur != null && cells != null && cells.length > 0) {
+      // Add the cells to the graph as draw.io does for its thumbnails and drops,
+      // so childLayout (stackLayout, ...) places their children, then record them.
+      var graph = sb.graph;
+      var added = graph.addCells(graph.cloneCells(cells));
       cur.entries.push({title: typeof title === 'string' ? title : '', w: width, h: height,
-        xml: encodeCells(sb.graph.cloneCells(cells))});
+        xml: encodeCells(graph.cloneCells(added))});
+      graph.getModel().clear();
     }
     return document.createElement('a');
   };

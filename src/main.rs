@@ -162,7 +162,7 @@ enum LibraryCommand {
         #[command(flatten)]
         source: LibrarySource,
     },
-    /// Print the style of a single-cell entry, to copy into hand-written XML
+    /// Print the style of a single-cell entry, escaped to paste into a style="..." attribute
     #[command(after_help = LIBRARY_ENV)]
     Style {
         /// Library name, as shown by `library search`
@@ -367,6 +367,14 @@ fn size(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
+/// Escapes text for a double-quoted XML attribute, such as styles with JSON values.
+fn attribute(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Keeps one record per line.
 fn one_line(text: &str) -> String {
     text.chars()
@@ -438,7 +446,7 @@ fn library_command(command: LibraryCommand) -> Result<()> {
                     library.name
                 )
             })?;
-            out = format!("{}\n", one_line(&style));
+            out = format!("{}\n", attribute(&one_line(&style)));
         }
         LibraryCommand::Preview {
             query,
