@@ -535,6 +535,22 @@ mxStencilRegistry.loadStencil = function(filename, fn) {
         error.contains("Unsupported shape: mxgraph.aws4.missing_icon"),
         "{error}"
     );
+    // Cell shapes such as rect fall back to a rectangle, but an icon lookup of the
+    // same name draws nothing upstream, so it still fails. (Namespaced fallbacks
+    // like mxgraph.android.rect would load stencils this stand-in root lacks.)
+    for name in ["rect", "text"] {
+        let shape = cell(&format!("shape={name};"));
+        render(&shape, Some(root.to_owned()), false).unwrap();
+        let icon = cell(&format!("shape=mxgraph.aws4.resourceIcon;resIcon={name};"));
+        let error = format!(
+            "{:#}",
+            render(&icon, Some(root.to_owned()), false).unwrap_err()
+        );
+        assert!(
+            error.contains(&format!("Unsupported shape: {name};")),
+            "{name}: {error}"
+        );
+    }
 }
 
 #[test]

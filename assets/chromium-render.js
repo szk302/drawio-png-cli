@@ -84,9 +84,10 @@ async function dipRender(xml, bundled, mode, preload) {
         }
         return drawNode.apply(this, arguments);
     };
-    // draw.io 26.0.2's own sidebar writes these shape names, which no draw.io
-    // version registers; upstream draws them as the default rectangle, so dip does
-    // too instead of reporting missing assets. Other unknown names still fail.
+    // draw.io 26.0.2's own sidebar writes these cell shape names, which no draw.io
+    // version registers; upstream's createShape draws them as the default
+    // rectangle, so dip does too. Only that lookup is exempt: an icon lookup
+    // (resIcon, grIcon) with the same name draws nothing upstream and still fails.
     const sidebarFallbacks = new Set([
         'rect',
         'text',
@@ -97,6 +98,8 @@ async function dipRender(xml, bundled, mode, preload) {
         'mxgraph.electrical.rot_mech.verticalLabelPosition=bottom',
         'mxgraph.pid.filters.liquid_Filter_(bag,_candle,_cartridge)',
     ]);
+    // The fallback name createShape is looking up, while it does.
+    let cellFallback = null;
     // Shapes such as mxgraph.aws4.resourceIcon look up their icon (resIcon, grIcon)
     // while painting and silently omit it when it is missing. Record every named
     // lookup that finds neither a stencil nor a shape class; dip fails on these.
@@ -104,7 +107,7 @@ async function dipRender(xml, bundled, mode, preload) {
     mxStencilRegistry.getStencil = function(name) {
         const stencil = getStencil.apply(this, arguments);
         if (stencil == null && typeof name === 'string' && name.trim() !== '' &&
-            !mxCellRenderer.defaultShapes[name] && !sidebarFallbacks.has(name)) {
+            !mxCellRenderer.defaultShapes[name] && name !== cellFallback) {
             window.dipErrors.push('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
         }
         return stencil;
@@ -114,10 +117,18 @@ async function dipRender(xml, bundled, mode, preload) {
         if (typeof name === 'string' && name.startsWith('stencil(') && name.endsWith(')')) {
             return new mxShape(inlineStencil(name.slice(8, -1)));
         }
+        if (sidebarFallbacks.has(name)) {
+            cellFallback = name;
+            try {
+                return original.apply(this, arguments);
+            } finally {
+                cellFallback = null;
+            }
+        }
         // getStencil can load a shape library (e.g. shapes/mxAWS4.js) that registers
         // a shape class rather than a stencil, so check the registry again after it.
-        if (name && !sidebarFallbacks.has(name) && !mxCellRenderer.defaultShapes[name] &&
-            !mxStencilRegistry.getStencil(name) && !mxCellRenderer.defaultShapes[name]) {
+        if (name && !mxCellRenderer.defaultShapes[name] && !mxStencilRegistry.getStencil(name) &&
+            !mxCellRenderer.defaultShapes[name]) {
             throw Error('Unsupported shape: ' + name + '; provide assets with DIP_DRAWIO_WEB_PATH');
         }
         return original.apply(this, arguments);
